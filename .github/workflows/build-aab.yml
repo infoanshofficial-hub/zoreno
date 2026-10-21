@@ -25,14 +25,9 @@ jobs:
 
       - name: Build Debug APK & Release AAB
         run: |
-          # Agar zip ke andar koi folder bana ho to usme enter karein
-          if [ -d "ZorenoApp" ]; then
-            cd ZorenoApp
-          elif [ -d "zorenoapp" ]; then
-            cd zorenoapp
-          fi
-          chmod +x gradlew || true
-          ./gradlew assembleDebug bundleRelease
+          # ZorenoApp फोल्डर के अंदर जाकर डायरेक्ट gradle चलाएं
+          cd ZorenoApp
+          gradle assembleDebug bundleRelease
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -42,3 +37,4 @@ jobs:
           path: |
             **/build/outputs/apk/**/*.apk
             **/build/outputs/bundle/**/*.aab
+            
