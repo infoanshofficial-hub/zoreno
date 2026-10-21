@@ -23,10 +23,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Gradle 8.7
-        uses: gradle/actions/setup-gradle@v3
-        with:
-          gradle-version: '8.7'
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Setup Project Structure and Build
         run: |
@@ -40,16 +38,12 @@ jobs:
           echo "Entering project directory: $PROJ_DIR"
           cd "$PROJ_DIR"
 
-          # 1. libs.versions.toml ko sahi gradle/ folder me move karein
+          # 1. Gradle files ko sahi jagah move karein
           mkdir -p gradle
-          if [ -f "libs.versions.toml" ]; then
-            mv libs.versions.toml gradle/
-          fi
-          if [ -f "gradle-wrapper.properties" ]; then
-            mv gradle-wrapper.properties gradle/
-          fi
+          [ -f "libs.versions.toml" ] && mv libs.versions.toml gradle/
+          [ -f "gradle-wrapper.properties" ] && mv gradle-wrapper.properties gradle/
 
-          # 2. Agar app module structure missing hai to create karein
+          # 2. App module folder structure setup karein
           if [ ! -d "app" ]; then
             mkdir -p app/src/main/assets
             mkdir -p app/src/main/java
@@ -57,32 +51,28 @@ jobs:
             mkdir -p app/src/main/res/drawable
             mkdir -p app/src/main/res/mipmap-anydpi-v26
 
-            # App level build.gradle
             if [ -f "build.gradle (1).kts" ]; then
               mv "build.gradle (1).kts" app/build.gradle.kts
             elif [ -f "build.gradle (1)" ]; then
               mv "build.gradle (1)" app/build.gradle
             fi
 
-            # AndroidManifest.xml
             [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/src/main/
-
-            # Web assets (HTML, CSS, JS, Sounds)
             mv *.html *.css *.js metadata.json app/src/main/assets/ 2>/dev/null || true
             [ -d "sounds" ] && mv sounds app/src/main/assets/ || true
-
-            # Java / Kotlin code
             mv *.java *.kt app/src/main/java/ 2>/dev/null || true
-
-            # Resources
             mv colors.xml themes.xml strings.xml backup_rules.xml data_extraction_rules.xml app/src/main/res/values/ 2>/dev/null || true
             mv ic_launcher*.xml logo.png splash.png app/src/main/res/drawable/ 2>/dev/null || true
             mv ic_launcher*.webp app/src/main/res/mipmap-anydpi-v26/ 2>/dev/null || true
             [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
           fi
 
-          echo "Running Gradle Build..."
-          gradle assembleDebug bundleRelease --stacktrace
+          # 3. Official Gradlew wrapper generate karein taaki exact version match ho
+          gradle wrapper
+          chmod +x gradlew
+
+          echo "Running Official Gradle Wrapper Build..."
+          ./gradlew assembleDebug bundleRelease --no-daemon
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
@@ -92,3 +82,4 @@ jobs:
           path: |
             **/build/outputs/apk/**/*.apk
             **/build/outputs/bundle/**/*.aab
+            
