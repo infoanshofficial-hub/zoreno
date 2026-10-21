@@ -15,11 +15,7 @@ jobs:
 
       - name: Unzip Project Package
         run: |
-          if [ -f "ZorenoApp.zip" ]; then
-            unzip -o ZorenoApp.zip
-          elif [ -f "*.zip" ]; then
-            unzip -o *.zip
-          fi
+          unzip -o zorenoapp.zip || unzip -o ZorenoApp.zip || unzip -o *.zip
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -29,17 +25,20 @@ jobs:
 
       - name: Build Debug APK & Release AAB
         run: |
+          # Agar zip ke andar koi folder bana ho to usme enter karein
           if [ -d "ZorenoApp" ]; then
             cd ZorenoApp
+          elif [ -d "zorenoapp" ]; then
+            cd zorenoapp
           fi
           chmod +x gradlew || true
-          ./gradlew assembleDebug bundleRelease || echo "Gradle build ready"
+          ./gradlew assembleDebug bundleRelease
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: zoreno-mobile-release-package
           path: |
-            **/build/outputs/apk/debug/*.apk
-            **/build/outputs/bundle/release/*.aab
-            **/release.jks
+            **/build/outputs/apk/**/*.apk
+            **/build/outputs/bundle/**/*.aab
