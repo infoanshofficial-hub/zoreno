@@ -154,11 +154,14 @@ jobs:
           echo "Running Clean Gradle Build..."
           gradle assembleDebug assembleRelease bundleRelease -x lint -x lintDebug -x lintRelease -x lintVitalRelease -x lintVitalAnalyzeRelease --no-configuration-cache --stacktrace
 
-      - name: Upload Artifacts
+            - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
           name: zoreno-mobile-release-package
           path: |
-            **/build/outputs/apk/**/*.apk
-            **/build/outputs/bundle/**/*.aab
+            *.apk
+            *.aab
+            app/build/outputs/apk/**/*.apk
+            app/build/outputs/bundle/**/*.aab
+            
