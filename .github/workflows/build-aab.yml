@@ -23,10 +23,11 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Gradle 8.9
-        uses: gradle/actions/setup-gradle@v3
+      - name: Set up Gradle 9.3.1
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '8.9'
+          gradle-version: '9.3.1'
+          cache-disabled: true
 
       - name: Setup Project Structure and Build
         run: |
@@ -40,37 +41,59 @@ jobs:
           echo "Entering project directory: $PROJ_DIR"
           cd "$PROJ_DIR"
 
-          # 1. Gradle files ko sahi gradle/ folder me move karein
-          mkdir -p gradle
+          # 1. Gradle aur Wrapper files sahi jagah move karein
+          mkdir -p gradle/wrapper
           [ -f "libs.versions.toml" ] && mv libs.versions.toml gradle/
-          [ -f "gradle-wrapper.properties" ] && mv gradle-wrapper.properties gradle/
+          [ -f "gradle-wrapper.properties" ] && mv gradle-wrapper.properties gradle/wrapper/
 
-          # 2. Module structure set karein
-          if [ ! -d "app" ]; then
-            mkdir -p app/src/main/assets
-            mkdir -p app/src/main/java
-            mkdir -p app/src/main/res/values
-            mkdir -p app/src/main/res/drawable
-            mkdir -p app/src/main/res/mipmap-anydpi-v26
+          # 2. Folders banayein
+          mkdir -p app/src/main/assets
+          mkdir -p app/src/main/java
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/xml
+          mkdir -p app/src/main/res/drawable
+          mkdir -p app/src/main/res/mipmap-anydpi-v26
+          mkdir -p app/src/main/res/mipmap-xxhdpi
 
-            if [ -f "build.gradle (1).kts" ]; then
+          # 3. Sahi build.gradle.kts ko app/ me aur root me set karein
+          if [ -f "build.gradle (1).kts" ] && [ -f "build.gradle.kts" ]; then
+            if grep -q "android {" "build.gradle.kts"; then
+              mv "build.gradle.kts" app/build.gradle.kts
+              mv "build.gradle (1).kts" build.gradle.kts
+            else
               mv "build.gradle (1).kts" app/build.gradle.kts
-            elif [ -f "build.gradle (1)" ]; then
-              mv "build.gradle (1)" app/build.gradle
             fi
-
-            [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/src/main/
-            mv *.html *.css *.js metadata.json app/src/main/assets/ 2>/dev/null || true
-            [ -d "sounds" ] && mv sounds app/src/main/assets/ || true
-            mv *.java *.kt app/src/main/java/ 2>/dev/null || true
-            mv colors.xml themes.xml strings.xml backup_rules.xml data_extraction_rules.xml app/src/main/res/values/ 2>/dev/null || true
-            mv ic_launcher*.xml logo.png splash.png app/src/main/res/drawable/ 2>/dev/null || true
-            mv ic_launcher*.webp app/src/main/res/mipmap-anydpi-v26/ 2>/dev/null || true
-            [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
+          elif [ -f "build.gradle (1).kts" ]; then
+            mv "build.gradle (1).kts" app/build.gradle.kts
           fi
 
+          # 4. Manifest aur Web Assets move karein
+          [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/src/main/
+          mv *.html *.css *.js metadata.json app/src/main/assets/ 2>/dev/null || true
+          [ -d "sounds" ] && mv sounds app/src/main/assets/ || true
+
+          # 5. Unused test/theme .kt files hatayein aur MainActivity.java ko package folder me rakhein
+          rm -f Example*.kt Color.kt Theme.kt Type.kt
+          if [ -f "MainActivity.java" ]; then
+            PKG_DIR=$(grep -oP '^package\s+\K[^;]+' MainActivity.java | tr '.' '/')
+            mkdir -p "app/src/main/java/$PKG_DIR"
+            mv MainActivity.java "app/src/main/java/$PKG_DIR/"
+          fi
+
+          # 6. Values aur XML resources ko alag-alag sahi folders me move karein
+          mv colors.xml themes.xml strings.xml app/src/main/res/values/ 2>/dev/null || true
+          mv backup_rules.xml data_extraction_rules.xml app/src/main/res/xml/ 2>/dev/null || true
+
+          # 7. Icons aur Drawables ko bina duplicate/bracket errors ke set karein
+          rm -f *"("*").webp"
+          mv ic_launcher_background.xml ic_launcher_foreground.xml logo.png splash.png app/src/main/res/drawable/ 2>/dev/null || true
+          mv ic_launcher.xml ic_launcher_round.xml app/src/main/res/mipmap-anydpi-v26/ 2>/dev/null || true
+          mv ic_launcher.webp ic_launcher_round.webp app/src/main/res/mipmap-xxhdpi/ 2>/dev/null || true
+
+          [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
+
           echo "Running Gradle Build..."
-          gradle assembleDebug bundleRelease
+          gradle assembleDebug bundleRelease --stacktrace
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
