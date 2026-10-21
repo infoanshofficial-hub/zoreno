@@ -27,7 +27,7 @@ jobs:
 
       - name: Setup Clean Project Structure and Build
         run: |
-          # 0. Pehle purane broken gradle/build folders saaf karein, phir zip extract karein
+          # 0. Purane build folders saaf karein aur agar zip hai toh extract karein
           rm -rf app build .gradle gradle libs.versions.toml
           for z in *.zip; do
             [ -f "$z" ] && unzip -o "$z" || true
@@ -42,7 +42,15 @@ jobs:
             PKG_NAME="com.zoreno.app"
           fi
           PKG_DIR=$(echo "$PKG_NAME" | tr '.' '/')
-          echo "Detected Package: $PKG_NAME"
+          echo "Detected Code Namespace: $PKG_NAME"
+
+          # Play Store com.example allow nahi karta, isliye final App ID com.zoreno.app rakhein
+          if [[ "$PKG_NAME" == com.example* ]]; then
+            APP_ID="com.zoreno.app"
+          else
+            APP_ID="$PKG_NAME"
+          fi
+          echo "Play Store Application ID: $APP_ID"
 
           # 2. Sahi Android folders banayein
           mkdir -p "app/src/main/java/$PKG_DIR"
@@ -55,33 +63,51 @@ jobs:
           mkdir -p app/src/main/res/mipmap-xxhdpi
 
           # 3. Code, Manifest aur Web Assets move karein
-          mv *.java "app/src/main/java/$PKG_DIR/" 2>/dev/null || true
+          cp *.java "app/src/main/java/$PKG_DIR/" 2>/dev/null || true
           if [ -f "AndroidManifest.xml" ]; then
-            mv AndroidManifest.xml app/src/main/
+            cp AndroidManifest.xml app/src/main/AndroidManifest.xml
             sed -i 's/package="[^"]*"//g' app/src/main/AndroidManifest.xml
           fi
-          mv *.html *.css *.js metadata.json app/src/main/assets/ 2>/dev/null || true
-          [ -d "sounds" ] && mv sounds app/src/main/assets/ || true
+          cp *.html *.css *.js metadata.json app/src/main/assets/ 2>/dev/null || true
+          [ -d "sounds" ] && cp -r sounds app/src/main/assets/ || true
 
           # 4. XML aur Image Resources sahi folders me move karein
-          mv colors.xml themes.xml strings.xml styles.xml dimens.xml app/src/main/res/values/ 2>/dev/null || true
-          mv activity_*.xml app/src/main/res/layout/ 2>/dev/null || true
-          mv backup_rules.xml data_extraction_rules.xml network_security_config.xml file_paths.xml app/src/main/res/xml/ 2>/dev/null || true
+          cp colors.xml themes.xml strings.xml styles.xml dimens.xml app/src/main/res/values/ 2>/dev/null || true
+          cp activity_*.xml app/src/main/res/layout/ 2>/dev/null || true
+          cp backup_rules.xml data_extraction_rules.xml network_security_config.xml file_paths.xml app/src/main/res/xml/ 2>/dev/null || true
 
           rm -f *"("*").webp" *.kt
-          mv ic_launcher_background.xml ic_launcher_foreground.xml logo.png splash.png *.png *.jpg app/src/main/res/drawable/ 2>/dev/null || true
-          mv ic_launcher.xml ic_launcher_round.xml app/src/main/res/mipmap-anydpi-v26/ 2>/dev/null || true
-          mv ic_launcher.webp ic_launcher_round.webp app/src/main/res/mipmap-xxhdpi/ 2>/dev/null || true
+          cp ic_launcher_background.xml ic_launcher_foreground.xml logo.png splash.png app/src/main/res/drawable/ 2>/dev/null || true
+          cp ic_launcher.xml ic_launcher_round.xml app/src/main/res/mipmap-anydpi-v26/ 2>/dev/null || true
+          cp ic_launcher.webp ic_launcher_round.webp app/src/main/res/mipmap-xxhdpi/ 2>/dev/null || true
           [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
 
-          # 5. Clean gradle.properties banayein
+          # 5. Play Store ke liye Release Keystore generate karein
+          rm -f app/zoreno-release-key.jks
+          keytool -genkeypair -v \
+            -keystore app/zoreno-release-key.jks \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias zoreno \
+            -storepass Zoreno@2026 \
+            -keypass Zoreno@2026 \
+            -dname "CN=Zoreno, OU=Mobile, O=Zoreno, L=Varanasi, S=UP, C=IN"
+
+          cat << 'EOF' > keystore-details.txt
+          Keystore File: zoreno-release-key.jks
+          Key Alias: zoreno
+          Store Password: Zoreno@2026
+          Key Password: Zoreno@2026
+          (Play Store par agle updates dalne ke liye is file aur password ko sambhal kar rakhein)
+          EOF
+
+          # 6. Clean gradle.properties banayein
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
           android.nonTransitiveRClass=true
           EOF
 
-          # 6. Clean settings.gradle.kts banayein
+          # 7. Clean settings.gradle.kts banayein
           cat << 'EOF' > settings.gradle.kts
           pluginManagement {
               repositories {
@@ -101,14 +127,14 @@ jobs:
           include(":app")
           EOF
 
-          # 7. Clean Root build.gradle.kts banayein (Stable AGP 8.7.3)
+          # 8. Clean Root build.gradle.kts banayein (Stable AGP 8.7.3)
           cat << 'EOF' > build.gradle.kts
           plugins {
               id("com.android.application") version "8.7.3" apply false
           }
           EOF
 
-          # 8. Clean App app/build.gradle.kts banayein
+          # 9. Clean App app/build.gradle.kts banayein (With Google AdMob SDK & Release Signing)
           cat << EOF > app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -119,17 +145,27 @@ jobs:
               compileSdk = 35
 
               defaultConfig {
-                  applicationId = "$PKG_NAME"
+                  applicationId = "$APP_ID"
                   minSdk = 24
                   targetSdk = 35
                   versionCode = 1
                   versionName = "1.0.0"
               }
 
+              signingConfigs {
+                  create("release") {
+                      storeFile = file("zoreno-release-key.jks")
+                      storePassword = "Zoreno@2026"
+                      keyAlias = "zoreno"
+                      keyPassword = "Zoreno@2026"
+                  }
+              }
+
               buildTypes {
                   release {
                       isMinifyEnabled = false
-                      signingConfig = signingConfigs.getByName("debug")
+                      isShrinkResources = false
+                      signingConfig = signingConfigs.getByName("release")
                   }
               }
 
@@ -153,8 +189,15 @@ jobs:
               implementation("androidx.webkit:webkit:1.12.1")
               implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
               implementation("androidx.core:core-splashscreen:1.0.1")
+              implementation("com.google.android.gms:play-services-ads:23.6.0")
+              implementation("com.android.billingclient:billing:7.1.1")
+              implementation("com.google.code.gson:gson:2.11.0")
+              implementation("androidx.browser:browser:1.8.0")
           }
           EOF
+
+          echo "=== Checking Java Imports ==="
+          grep "^import " "app/src/main/java/$PKG_DIR/"*.java || true
 
           echo "Running Clean Gradle Build..."
           gradle assembleDebug assembleRelease bundleRelease -x lint -x lintDebug
@@ -164,7 +207,9 @@ jobs:
         if: success()
         with:
           name: zoreno-mobile-release-package
-          if-no-files-found: ignore
           path: |
             app/build/outputs/apk/**/*.apk
             app/build/outputs/bundle/**/*.aab
+            app/zoreno-release-key.jks
+            keystore-details.txt
+            
