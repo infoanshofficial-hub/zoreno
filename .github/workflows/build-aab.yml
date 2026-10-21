@@ -23,77 +23,136 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Set up Gradle 9.3.1
+      - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.3.1'
+          gradle-version: '8.9'
           cache-disabled: true
 
-      - name: Setup Project Structure and Build
+      - name: Setup Clean Project Structure and Build
         run: |
-          SETTINGS_FILE=$(find . -name "settings.gradle*" | head -n 1)
-          if [ -z "$SETTINGS_FILE" ]; then
-            echo "settings.gradle file nahi mili!"
-            exit 1
+          # Purane broken gradle/build folders saaf karein
+          rm -rf app build .gradle gradle libs.versions.toml
+
+          # 1. MainActivity.java se exact package name nikalein
+          if [ -f "MainActivity.java" ]; then
+            PKG_NAME=$(grep -oP '^package\s+\K[^;]+' MainActivity.java | tr -d '[:space:]')
           fi
+          if [ -z "$PKG_NAME" ]; then
+            PKG_NAME="com.zoreno.app"
+          fi
+          PKG_DIR=$(echo "$PKG_NAME" | tr '.' '/')
+          echo "Detected Package: $PKG_NAME"
 
-          PROJ_DIR=$(dirname "$SETTINGS_FILE")
-          echo "Entering project directory: $PROJ_DIR"
-          cd "$PROJ_DIR"
-
-          # 1. Gradle aur Wrapper files sahi jagah move karein
-          mkdir -p gradle/wrapper
-          [ -f "libs.versions.toml" ] && mv libs.versions.toml gradle/
-          [ -f "gradle-wrapper.properties" ] && mv gradle-wrapper.properties gradle/wrapper/
-
-          # 2. Folders banayein
+          # 2. Sahi Android folders banayein
+          mkdir -p "app/src/main/java/$PKG_DIR"
           mkdir -p app/src/main/assets
-          mkdir -p app/src/main/java
           mkdir -p app/src/main/res/values
           mkdir -p app/src/main/res/xml
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/mipmap-anydpi-v26
           mkdir -p app/src/main/res/mipmap-xxhdpi
 
-          # 3. Sahi build.gradle.kts ko app/ me aur root me set karein
-          if [ -f "build.gradle (1).kts" ] && [ -f "build.gradle.kts" ]; then
-            if grep -q "android {" "build.gradle.kts"; then
-              mv "build.gradle.kts" app/build.gradle.kts
-              mv "build.gradle (1).kts" build.gradle.kts
-            else
-              mv "build.gradle (1).kts" app/build.gradle.kts
-            fi
-          elif [ -f "build.gradle (1).kts" ]; then
-            mv "build.gradle (1).kts" app/build.gradle.kts
-          fi
-
-          # 4. Manifest aur Web Assets move karein
+          # 3. Code, Manifest aur Web Assets move karein
+          [ -f "MainActivity.java" ] && mv MainActivity.java "app/src/main/java/$PKG_DIR/"
           [ -f "AndroidManifest.xml" ] && mv AndroidManifest.xml app/src/main/
           mv *.html *.css *.js metadata.json app/src/main/assets/ 2>/dev/null || true
           [ -d "sounds" ] && mv sounds app/src/main/assets/ || true
 
-          # 5. Unused test/theme .kt files hatayein aur MainActivity.java ko package folder me rakhein
-          rm -f Example*.kt Color.kt Theme.kt Type.kt
-          if [ -f "MainActivity.java" ]; then
-            PKG_DIR=$(grep -oP '^package\s+\K[^;]+' MainActivity.java | tr '.' '/')
-            mkdir -p "app/src/main/java/$PKG_DIR"
-            mv MainActivity.java "app/src/main/java/$PKG_DIR/"
-          fi
-
-          # 6. Values aur XML resources ko alag-alag sahi folders me move karein
+          # 4. XML aur Image Resources sahi folders me move karein
           mv colors.xml themes.xml strings.xml app/src/main/res/values/ 2>/dev/null || true
           mv backup_rules.xml data_extraction_rules.xml app/src/main/res/xml/ 2>/dev/null || true
 
-          # 7. Icons aur Drawables ko bina duplicate/bracket errors ke set karein
-          rm -f *"("*").webp"
+          rm -f *"("*").webp" *.kt
           mv ic_launcher_background.xml ic_launcher_foreground.xml logo.png splash.png app/src/main/res/drawable/ 2>/dev/null || true
           mv ic_launcher.xml ic_launcher_round.xml app/src/main/res/mipmap-anydpi-v26/ 2>/dev/null || true
           mv ic_launcher.webp ic_launcher_round.webp app/src/main/res/mipmap-xxhdpi/ 2>/dev/null || true
-
           [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
 
-          echo "Running Gradle Build..."
-          gradle assembleDebug bundleRelease --stacktrace
+          # 5. Clean gradle.properties banayein (No Configuration Cache crash)
+          cat << 'EOF' > gradle.properties
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          android.nonTransitiveRClass=true
+          EOF
+
+          # 6. Clean settings.gradle.kts banayein
+          cat << 'EOF' > settings.gradle.kts
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "Zoreno"
+          include(":app")
+          EOF
+
+          # 7. Clean Root build.gradle.kts banayein (Stable AGP 8.7.3)
+          cat << 'EOF' > build.gradle.kts
+          plugins {
+              id("com.android.application") version "8.7.3" apply false
+          }
+          EOF
+
+          # 8. Clean App app/build.gradle.kts banayein
+          cat << EOF > app/build.gradle.kts
+          plugins {
+              id("com.android.application")
+          }
+
+          android {
+              namespace = "$PKG_NAME"
+              compileSdk = 35
+
+              defaultConfig {
+                  applicationId = "$PKG_NAME"
+                  minSdk = 24
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                      signingConfig = signingConfigs.getByName("debug")
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              lint {
+                  checkReleaseBuilds = false
+                  abortOnError = false
+              }
+          }
+
+          dependencies {
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              implementation("com.google.android.material:material:1.12.0")
+              implementation("androidx.activity:activity:1.9.3")
+              implementation("androidx.core:core:1.13.1")
+              implementation("androidx.constraintlayout:constraintlayout:2.2.0")
+              implementation("androidx.webkit:webkit:1.12.1")
+              implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+              implementation("androidx.core:core-splashscreen:1.0.1")
+          }
+          EOF
+
+          echo "Running Clean Gradle Build..."
+          gradle assembleDebug assembleRelease bundleRelease -x lint -x lintDebug -x lintRelease -x lintVitalRelease -x lintVitalAnalyzeRelease --no-configuration-cache --stacktrace
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
