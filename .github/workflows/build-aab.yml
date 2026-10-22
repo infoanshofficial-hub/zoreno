@@ -48,13 +48,15 @@ jobs:
           else
             APP_ID="$PKG_NAME"
           fi
-          echo "Detected Code Namespace: $PKG_NAME \vert{} Play Store App ID:$APP_ID"
+          echo "Detected Code Namespace: $PKG_NAME | Play Store App ID: $APP_ID"
 
           # 2. Sahi Android folders banayein
           mkdir -p "app/src/main/java/$PKG_DIR"
           mkdir -p app/src/main/assets
           mkdir -p app/src/main/res/layout
           mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/values-night
+          mkdir -p app/src/main/res/values-v31
           mkdir -p app/src/main/res/xml
           mkdir -p app/src/main/res/drawable
           mkdir -p app/src/main/res/mipmap-anydpi-v26
@@ -67,7 +69,7 @@ jobs:
           [ -d "sounds" ] && cp -r sounds app/src/main/assets/ || true
 
           # 4. XML aur Image Resources sahi folders me move karein
-          cp colors.xml strings.xml styles.xml dimens.xml app/src/main/res/values/ 2>/dev/null || true
+          cp colors.xml strings.xml dimens.xml app/src/main/res/values/ 2>/dev/null || true
           cp activity_*.xml app/src/main/res/layout/ 2>/dev/null || true
           cp backup_rules.xml data_extraction_rules.xml network_security_config.xml file_paths.xml app/src/main/res/xml/ 2>/dev/null || true
 
@@ -77,7 +79,18 @@ jobs:
           cp ic_launcher.webp ic_launcher_round.webp app/src/main/res/mipmap-xxhdpi/ 2>/dev/null || true
           [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
 
-          # 5. AUTOMATIC JAVA PATCH: MainActivity.java me Black Status Bar, 3-Button Nav Insets aur Razorpay Fallback lagayein
+          # 4B. Android 12+ ke Gole (Z Circle Icon) ko gayab karne ke liye 1x1 Transparent Drawable banayein
+          cat << 'EOF' > app/src/main/res/drawable/transparent_splash_icon.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <vector xmlns:android="http://schemas.android.com/apk/res/android"
+              android:width="1dp"
+              android:height="1dp"
+              android:viewportWidth="1"
+              android:viewportHeight="1">
+          </vector>
+          EOF
+
+          # 5. AUTOMATIC JAVA PATCH: Pure Black Status Bar, Native Direct Splash & Razorpay Fallback
           python3 - << 'PYEOF'
           import glob, re
 
@@ -86,36 +99,68 @@ jobs:
                   code = f.read()
 
               if "class MainActivity" in code:
-                  # A. Inject System Bars & 3-Button Navigation Inset Handling right after super.onCreate(...)
-                  inset_code = """
+                  # Remove any system SplashScreen.installSplashScreen call if present
+                  code = re.sub(r'SplashScreen\.installSplashScreen\s*\(\s*this\s*\)\s*;', '', code)
+
+                  # A. Inject Pure Black Status/Nav Bar + Insets + Native Full-Screen Splash Overlay right after super.onCreate(...)
+                  inset_and_splash_code = """
                   androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+                  getWindow().getDecorView().setBackgroundColor(android.graphics.Color.BLACK);
                   getWindow().setStatusBarColor(android.graphics.Color.BLACK);
                   getWindow().setNavigationBarColor(android.graphics.Color.BLACK);
+                  androidx.core.view.WindowInsetsControllerCompat insetsCtrl =
+                      androidx.core.view.WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+                  if (insetsCtrl != null) {
+                      insetsCtrl.setAppearanceLightStatusBars(false);
+                      insetsCtrl.setAppearanceLightNavigationBars(false);
+                  }
                   android.view.View rootContentView = findViewById(android.R.id.content);
                   if (rootContentView != null) {
+                      rootContentView.setBackgroundColor(android.graphics.Color.BLACK);
                       androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(rootContentView, (v, insets) -> {
                           androidx.core.graphics.Insets bars = insets.getInsets(
                               androidx.core.view.WindowInsetsCompat.Type.systemBars() |
                               androidx.core.view.WindowInsetsCompat.Type.ime()
                           );
+                          v.setBackgroundColor(android.graphics.Color.BLACK);
                           v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
                           return androidx.core.view.WindowInsetsCompat.CONSUMED;
                       });
+                      if (rootContentView instanceof android.view.ViewGroup) {
+                          final android.view.ViewGroup rootGroup = (android.view.ViewGroup) rootContentView;
+                          final android.widget.ImageView nativeSplash = new android.widget.ImageView(this);
+                          nativeSplash.setImageResource(R.drawable.splash);
+                          nativeSplash.setScaleType(android.widget.ImageView.ScaleType.CENTER_CROP);
+                          nativeSplash.setBackgroundColor(android.graphics.Color.BLACK);
+                          nativeSplash.setElevation(9999f);
+                          rootGroup.addView(nativeSplash, new android.view.ViewGroup.LayoutParams(
+                              android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                              android.view.ViewGroup.LayoutParams.MATCH_PARENT
+                          ));
+                          nativeSplash.postDelayed(() -> {
+                              nativeSplash.animate().alpha(0f).setDuration(350).withEndAction(() -> {
+                                  if (nativeSplash.getParent() != null) {
+                                      ((android.view.ViewGroup) nativeSplash.getParent()).removeView(nativeSplash);
+                                  }
+                              }).start();
+                          }, 1500);
+                      }
                   }
                   """
                   if "setOnApplyWindowInsetsListener(rootContentView" not in code:
                       code = re.sub(
                           r'(super\.onCreate\s*\([^)]*\)\s*;)',
-                          r'\1\n' + inset_code,
+                          r'\1\n' + inset_and_splash_code,
                           code,
                           count=1
                       )
 
-                  # B. If Play Console product not found or installed from Indus Appstore, auto-trigger WebView Razorpay fallback
+                  # B. Multiline-safe replacement for Play Console product not found Toast -> trigger Razorpay
                   code = re.sub(
-                      r'Toast\.makeText\([^;]*Subscription product not found on Play Console[^;]*\)\.show\(\);',
+                      r'Toast\.makeText\s*\([^;]*?(?:Subscription product not found|Play Console)[^;]*?\)\s*\.show\s*\(\s*\)\s*;',
                       r'runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript("if(typeof window.triggerRazorpayFallback===\'function\'){window.triggerRazorpayFallback();}", null); });',
-                      code
+                      code,
+                      flags=re.DOTALL
                   )
 
                   with open(java_file, "w", encoding="utf-8") as f:
@@ -123,19 +168,28 @@ jobs:
                   print("Successfully auto-patched MainActivity.java")
           PYEOF
 
-          # 6. Clean themes.xml (Black Status Bar & Navigation Bar, No Edge-to-Edge Overlap)
+          # 6. Clean themes.xml (Pure Black Background & Status Bar + No Android 12 Circle Z Logo)
+          rm -f app/src/main/res/values/styles.xml
           cat << 'EOF' > app/src/main/res/values/themes.xml
           <resources xmlns:tools="http://schemas.android.com/tools">
               <style name="Theme.Zoreno" parent="Theme.MaterialComponents.DayNight.NoActionBar">
                   <item name="android:statusBarColor">#000000</item>
                   <item name="android:navigationBarColor">#000000</item>
                   <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowLightNavigationBar" tools:targetApi="27">false</item>
                   <item name="android:windowFullscreen">false</item>
                   <item name="android:fitsSystemWindows">true</item>
-                  <item name="android:windowBackground">@drawable/splash</item>
+                  <item name="android:windowBackground">#000000</item>
+                  <item name="android:windowSplashScreenBackground" tools:targetApi="31">#000000</item>
+                  <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/transparent_splash_icon</item>
+                  <item name="android:windowSplashScreenIconBackgroundColor" tools:targetApi="31">@android:color/transparent</item>
+                  <item name="android:windowSplashScreenAnimationDuration" tools:targetApi="31">0</item>
               </style>
           </resources>
           EOF
+
+          cp app/src/main/res/values/themes.xml app/src/main/res/values-night/themes.xml
+          cp app/src/main/res/values/themes.xml app/src/main/res/values-v31/themes.xml
 
           # 7. AndroidManifest.xml me adjustResize aur Theme fix karein
           if [ -f "AndroidManifest.xml" ]; then
@@ -149,21 +203,35 @@ jobs:
             fi
           fi
 
-          # 8. Zoreno Automatic CSS Fixes banayein
+          # 8. Zoreno Automatic CSS Fixes banayein (Settings Scroll Fix + Safe Area + Splash)
           cat << 'EOF' > app/src/main/assets/zoreno-fixes.css
-          /* 1. Screen Fit, Status Bar & 3-Button/Gesture Nav Safe Area Fix */
+          /* 1. Enable Smooth Vertical Scrolling on Body & All App Screens (Fixes Settings Scroll) */
           html, body {
               width: 100% !important;
-              height: 100dvh !important;
-              max-height: 100dvh !important;
+              min-height: 100dvh !important;
+              height: auto !important;
               margin: 0 !important;
               padding: 0 !important;
-              overflow: hidden !important;
+              overflow-x: hidden !important;
+              overflow-y: auto !important;
+              -webkit-overflow-scrolling: touch !important;
               box-sizing: border-box !important;
           }
 
-          /* 2. Keyboard खुलने पर Header गायब न हो */
-          .chat-screen, .ai-chat-screen, #chat-container, .main-wrapper {
+          /* Settings, Profile, Plans, Tools & Page Containers Scroll Fix */
+          [id*="setting" i], [class*="setting" i],
+          [id*="profile" i], [class*="profile" i],
+          [id*="plan" i], [class*="plan" i],
+          [id*="premium" i], [class*="premium" i],
+          [id*="tool" i], [class*="tool" i],
+          .page, .view, .tab-content, .tab-pane, .screen-container {
+              overflow-y: auto !important;
+              -webkit-overflow-scrolling: touch !important;
+              padding-bottom: 120px !important;
+          }
+
+          /* 2. Chat Screen Layout: Keep Header Sticky & Messages Scrollable */
+          .chat-screen, .ai-chat-screen, #chat-container {
               display: flex !important;
               flex-direction: column !important;
               height: 100dvh !important;
@@ -179,14 +247,15 @@ jobs:
           .messages-container, .chat-messages, #messages {
               flex: 1 1 auto !important;
               overflow-y: auto !important;
-              padding-bottom: 12px !important;
+              -webkit-overflow-scrolling: touch !important;
+              padding-bottom: 16px !important;
           }
           .chat-input-bar, .input-area {
               flex-shrink: 0 !important;
               margin-bottom: env(safe-area-inset-bottom, 0px) !important;
           }
 
-          /* 3. Bottom Floating Bar (4 Tabs) 3-Button Navigation से ऊपर रहे */
+          /* 3. Bottom Floating Bar (4 Tabs) 3-Button Navigation se upar rahe */
           .bottom-nav, .floating-nav, nav.bottom-bar {
               bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
               z-index: 999 !important;
@@ -197,7 +266,7 @@ jobs:
               display: none !important;
           }
 
-          /* 4. Focus Music Mode में 10 बटनों के बीच का गैप सही करें */
+          /* 4. Focus Music Mode Grid Spacing */
           .music-grid, .sounds-grid, .focus-music-list, [class*="music"] .grid {
               display: grid !important;
               grid-template-columns: repeat(2, 1fr) !important;
@@ -205,7 +274,7 @@ jobs:
               align-content: start !important;
               height: auto !important;
               flex: 0 0 auto !important;
-              padding-bottom: 85px !important;
+              padding-bottom: 95px !important;
           }
           .music-card, .sound-item {
               padding: 12px 14px !important;
@@ -213,74 +282,34 @@ jobs:
               max-height: 66px !important;
           }
 
-          /* 5. Full Screen Custom Splash Screen Overlay (No White Flash) */
+          /* 5. Full Screen Custom Splash Screen Overlay */
           #zoreno-custom-splash {
               position: fixed;
               inset: 0;
-              background: #0f0c29 url('splash.png') no-repeat center center;
+              background: #000000 url('splash.png') no-repeat center center;
               background-size: cover;
               z-index: 999999;
-              transition: opacity 0.4s ease;
-          }
-
-          /* 6. Official Google Sign-In Button Styling */
-          .zoreno-google-btn-wrap {
-              width: 100%;
-              margin-top: 12px;
-              margin-bottom: 8px;
-              text-align: center;
-          }
-          .zoreno-or-divider {
-              display: flex;
-              align-items: center;
-              text-align: center;
-              color: #888;
-              font-size: 12px;
-              margin: 10px 0;
-          }
-          .zoreno-or-divider::before, .zoreno-or-divider::after {
-              content: '';
-              flex: 1;
-              border-bottom: 1px solid #e0e0e0;
-          }
-          .zoreno-or-divider span {
-              padding: 0 12px;
-              font-weight: 600;
-          }
-          .zoreno-google-btn {
-              display: flex;
-              align-items: center;
-              justify-content: center;
-              gap: 10px;
-              width: 100%;
-              padding: 12px 16px;
-              background: #ffffff;
-              color: #1f1f1f;
-              border: 1px solid #dcdcdc;
-              border-radius: 999px;
-              font-size: 15px;
-              font-weight: 600;
-              cursor: pointer;
-              box-shadow: 0 2px 8px rgba(0,0,0,0.05);
-          }
-          .zoreno-google-btn:active {
-              transform: scale(0.98);
-              background: #f5f5f5;
+              transition: opacity 0.35s ease;
           }
           EOF
 
-          # 9. Zoreno Automatic JS Fixes banayein
+          # 9. Zoreno Automatic JS Fixes banayein (3-Layer LaTeX Fix + Settings Scroll + Timer Fix)
           cat << 'EOF' > app/src/main/assets/zoreno-fixes.js
           (function() {
-              // --- A. SPLASH SCREEN OVERLAY (NO WHITE SCREEN) ---
-              const splash = document.createElement('div');
-              splash.id = 'zoreno-custom-splash';
-              document.documentElement.appendChild(splash);
+              // --- A. INSTANT SPLASH SCREEN OVERLAY CLEANUP ---
+              let splash = document.getElementById('zoreno-custom-splash');
+              if (!splash) {
+                  splash = document.createElement('div');
+                  splash.id = 'zoreno-custom-splash';
+                  document.documentElement.appendChild(splash);
+              }
               window.addEventListener('load', () => {
                   setTimeout(() => {
-                      splash.style.opacity = '0';
-                      setTimeout(() => splash.remove(), 400);
-                  }, 1000);
+                      if (splash) {
+                          splash.style.opacity = '0';
+                          setTimeout(() => splash.remove(), 350);
+                      }
+                  }, 1100);
               });
 
               // --- B. KEYBOARD DETECTOR FOR FLOATING NAV & HEADER ---
@@ -302,13 +331,11 @@ jobs:
                   const btnText = (buyEl.innerText || '').trim().toLowerCase();
                   const href = buyEl.getAttribute('href') || '';
                   if (btnText.includes('buy') || href.includes('amazon') || href.includes('amzn')) {
-                      // Extract existing affiliate tag from page scripts if available
                       let affiliateTag = 'zoreno-21';
                       const scriptsText = Array.from(document.querySelectorAll('script')).map(s => s.innerHTML).join(' ');
                       const tagMatch = scriptsText.match(/tag=([a-zA-Z0-9_-]+-21)/);
                       if (tagMatch && tagMatch[1]) affiliateTag = tagMatch[1];
 
-                      // Find product title from the recommendation card
                       const card = buyEl.closest('div');
                       let productTitle = 'Study Stationery Pen Notebook';
                       if (card) {
@@ -317,7 +344,6 @@ jobs:
                           if (filtered.length > 0) productTitle = filtered[0];
                       }
 
-                      // If URL is broken, short-link 404, or invalid, route to working Amazon Affiliate Search URL
                       if (!href || href === '#' || href.includes('undefined') || href.includes('amzn.to') || !href.includes('amazon.in/dp/')) {
                           e.preventDefault();
                           e.stopPropagation();
@@ -327,18 +353,32 @@ jobs:
                   }
               }, true);
 
-              // --- D. CLEAN MATH / LATEX ($ AND \text FIX) ---
+              // --- D. COMPLETE LATEX / MATH SYNTAX CLEANER ($a = 2\text{ m/s}^2$, \frac{1}{2}, \times) ---
+              const supMap = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','n':'ⁿ'};
+              const subMap = {'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','k':'ₖ','s':'ₛ','i':'ᵢ','m':'ₘ'};
+
+              function toSup(s) {
+                  return s.split('').map(c => supMap[c] || c).join('');
+              }
+              function toSub(s) {
+                  return s.split('').map(c => subMap[c] || c).join('');
+              }
+
               function cleanMathText(text) {
                   if (!text || typeof text !== 'string') return text;
                   return text
                       .replace(/\\\$/g, '')
                       .replace(/\$\$/g, '')
                       .replace(/\$/g, '')
+                      .replace(/\\\[|\\\]|\\\(|\\\)/g, '')
+                      .replace(/\\frac\s*\{([^{}]+)\}\s*\{([^{}]+)\}/g, '($1/$2)')
+                      .replace(/\\sqrt\s*\{([^{}]+)\}/g, '√($1)')
+                      .replace(/\\(?:text|mathrm|mathbf|mathit|textbf|textit|textrm)\s*\{([^{}]*)\}/g, '$1')
                       .replace(/\\triangle/g, 'Δ')
                       .replace(/\\Delta/g, 'Δ')
                       .replace(/\\angle/g, '∠')
-                      .replace(/\\circ/g, '°')
                       .replace(/\^\{?\\circ\}?/g, '°')
+                      .replace(/\\circ/g, '°')
                       .replace(/\^°/g, '°')
                       .replace(/\\mu_k/g, 'μₖ')
                       .replace(/\\mu_s/g, 'μₛ')
@@ -346,47 +386,94 @@ jobs:
                       .replace(/\\tau/g, 'τ')
                       .replace(/\\alpha/g, 'α')
                       .replace(/\\beta/g, 'β')
+                      .replace(/\\gamma/g, 'γ')
                       .replace(/\\theta/g, 'θ')
+                      .replace(/\\lambda/g, 'λ')
+                      .replace(/\\omega/g, 'ω')
+                      .replace(/\\sigma/g, 'σ')
+                      .replace(/\\rho/g, 'ρ')
                       .replace(/\\pi/g, 'π')
-                      .replace(/\\cdot/g, '×')
+                      .replace(/\\infty/g, '∞')
+                      .replace(/\\Rightarrow/g, '⇒')
+                      .replace(/\\rightarrow|\\to/g, '→')
+                      .replace(/\\cdot/g, '·')
                       .replace(/\\times/g, '×')
                       .replace(/\\div/g, '÷')
                       .replace(/\\pm/g, '±')
-                      .replace(/\\leq/g, '≤')
-                      .replace(/\\geq/g, '≥')
-                      .replace(/\\neq/g, '≠')
+                      .replace(/\\leq|\\le/g, '≤')
+                      .replace(/\\geq|\\ge/g, '≥')
+                      .replace(/\\neq|\\ne/g, '≠')
                       .replace(/\\approx/g, '≈')
-                      .replace(/\\sqrt\{([^}]+)\}/g, '√($1)') .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1/$2)') .replace(/\\text\{([^}]*)\}/g, '$1')
+                      .replace(/\^\{([0-9+\-n]+)\}/g, (_, p1) => toSup(p1))
+                      .replace(/\^([0-9])/g, (_, p1) => toSup(p1))
+                      .replace(/_\{([0-9ksim]+)\}/g, (_, p1) => toSub(p1))
+                      .replace(/_([0-9ksim])\b/g, (_, p1) => toSub(p1))
+                      .replace(/\\([a-zA-Z]+)\b/g, '$1')
                       .replace(/[\u4e00-\u9fff]+/g, 'स्लाइडिंग (Sliding)');
               }
 
-              // --- E. AI FETCH INTERCEPTOR (2048 TOKENS + JEE/NEET PROMPT + CLEAN MATH) ---
+              // --- E. AI FETCH INTERCEPTOR (REQUEST + RESPONSE JSON/TEXT MATH CLEANER) ---
               const origFetch = window.fetch;
               window.fetch = async function(url, options) {
-                  if (typeof url === 'string' && (url.includes('generativelanguage') || url.includes('openai') || url.includes('chat') || url.includes('completions'))) {
+                  const isAiCall = typeof url === 'string' && (
+                      url.includes('generativelanguage') ||
+                      url.includes('openai') ||
+                      url.includes('groq') ||
+                      url.includes('openrouter') ||
+                      url.includes('chat') ||
+                      url.includes('completions')
+                  );
+                  if (isAiCall && options && options.body) {
                       try {
-                          if (options && options.body) {
-                              let body = JSON.parse(options.body);
-                              const expertRule = "IMPORTANT: You are Zoreno AI, an expert tutor for NEET, IIT-JEE, UPSC and school exams. Solve Physics, Chemistry, Math and Biology problems step-by-step with clear calculations and complete final answers. NEVER use raw LaTeX dollar signs ($) or \\text{}. Use clean Unicode math symbols like ΔABC, ∠A = 70°, μ = 0.2, τ = F × R, √x, x². Never use Chinese characters.";
-                              if (body.generationConfig) {
-                                  body.generationConfig.maxOutputTokens = 2048;
-                              } else if (body.contents) {
-                                  body.generationConfig = { maxOutputTokens: 2048, temperature: 0.7 };
-                              }
-                              if (body.max_tokens) {
-                                  body.max_tokens = 2048;
-                              }
-                              if (body.systemInstruction && body.systemInstruction.parts) {
-                                  body.systemInstruction.parts[0].text += "\n" + expertRule;
-                              }
-                              options.body = JSON.stringify(body);
+                          let body = JSON.parse(options.body);
+                          const expertRule = "IMPORTANT: You are Zoreno AI, an expert tutor for NEET, IIT-JEE, UPSC and school exams. Solve Physics, Chemistry, Math and Biology problems step-by-step with clear calculations. STRICT RULE: NEVER use LaTeX dollar signs ($), \\text{}, \\frac{}{}, or \\times. Write plain Unicode math like: a = 2 m/s², v = u + at, s = ut + (1/2)at², (2 × 5) = 10 m/s, ΔABC, ∠A = 70°, √x.";
+                          if (body.generationConfig) {
+                              body.generationConfig.maxOutputTokens = 2048;
+                          } else if (body.contents) {
+                              body.generationConfig = { maxOutputTokens: 2048, temperature: 0.7 };
                           }
+                          if (body.max_tokens) {
+                              body.max_tokens = 2048;
+                          }
+                          if (body.systemInstruction && body.systemInstruction.parts) {
+                              body.systemInstruction.parts[0].text += "\n" + expertRule;
+                          } else if (Array.isArray(body.messages)) {
+                              body.messages.unshift({ role: "system", content: expertRule });
+                          }
+                          options.body = JSON.stringify(body);
                       } catch (err) {}
                   }
-                  return origFetch.apply(this, arguments);
+
+                  const response = await origFetch.apply(this, arguments);
+                  if (isAiCall && response) {
+                      const origJson = response.json.bind(response);
+                      response.json = async function() {
+                          const data = await origJson();
+                          try {
+                              if (data && data.candidates) {
+                                  data.candidates.forEach(c => {
+                                      if (c.content && c.content.parts) {
+                                          c.content.parts.forEach(p => {
+                                              if (p.text) p.text = cleanMathText(p.text);
+                                          });
+                                      }
+                                  });
+                              }
+                              if (data && data.choices) {
+                                  data.choices.forEach(ch => {
+                                      if (ch.message && ch.message.content) {
+                                          ch.message.content = cleanMathText(ch.message.content);
+                                      }
+                                  });
+                              }
+                          } catch (e) {}
+                          return data;
+                      };
+                  }
+                  return response;
               };
 
-              // --- F. DAILY CHAT QUOTA (MIDNIGHT RESET + REWARDED +3 FOR FREE/PLUS/PRO) ---
+              // --- F. DAILY CHAT QUOTA (MIDNIGHT RESET) ---
               function getLocalToday() {
                   const d = new Date();
                   return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -396,7 +483,6 @@ jobs:
               if (lastSavedDate !== todayStr) {
                   localStorage.setItem('zoreno_strict_quota_date', todayStr);
               } else {
-                  // Prevent same-day morning reset of used chats count
                   const cachedUsed = localStorage.getItem('zoreno_strict_used_chats');
                   if (cachedUsed && parseInt(cachedUsed, 10) >= 10) {
                       for (let i = 0; i < localStorage.length; i++) {
@@ -409,7 +495,7 @@ jobs:
                   }
               }
 
-              // --- G. RAZORPAY FALLBACK FOR INDUS APPSTORE & UNPUBLISHED PLAY BILLING ---
+              // --- G. RAZORPAY FALLBACK ---
               window.triggerRazorpayFallback = function() {
                   if (typeof window.openRazorpay === 'function') {
                       window.openRazorpay();
@@ -421,92 +507,90 @@ jobs:
                   }
               };
 
-              // --- H. DOM OBSERVER: LOGO.PNG, 12-HOUR AM/PM, DELETE FOR EVERYONE & GOOGLE SIGN-IN ---
-              const observer = new MutationObserver(() => {
-                  // 1. Replace Boy Photo with Zoreno logo.png for Zoreno AI Official
-                  document.querySelectorAll('img').forEach(img => {
-                      const block = img.closest('div, li, header');
-                      const blockTxt = block ? (block.innerText || '') : '';
-                      if (blockTxt.includes('Zoreno AI') || (img.alt && img.alt.includes('Zoreno AI')) || img.src.includes('unsplash') || img.src.includes('pravatar') || img.src.includes('randomuser')) {
-                          if (blockTxt.includes('Zoreno AI') && !img.src.includes('logo.png')) {
-                              img.src = 'logo.png';
+              // --- H. SETTINGS SCROLL UNLOCKER ---
+              function fixSettingsScroll() {
+                  document.querySelectorAll('h1, h2, h3, div, span').forEach(el => {
+                      if (el.children.length === 0 && (el.innerText || '').trim() === 'Settings') {
+                          let parent = el.parentElement;
+                          let depth = 0;
+                          while (parent && parent !== document.body && depth < 7) {
+                              const style = window.getComputedStyle(parent);
+                              if (style.overflow === 'hidden' || style.overflowY === 'hidden' || parent.scrollHeight >= window.innerHeight * 0.7) {
+                                  parent.style.setProperty('overflow-y', 'auto', 'important');
+                                  parent.style.setProperty('-webkit-overflow-scrolling', 'touch', 'important');
+                                  parent.style.setProperty('max-height', '100dvh', 'important');
+                                  parent.style.setProperty('padding-bottom', '130px', 'important');
+                              }
+                              parent = parent.parentElement;
+                              depth++;
                           }
                       }
                   });
+              }
 
-                  // 2. Convert 24-Hour Time (e.g. 22:40, 16:00) to 12-Hour AM/PM & Clean Math ($)
+              // --- I. DOM OBSERVER: MATH TREEWALKER, SETTINGS SCROLL, LOGO.PNG & TIME FORMAT ---
+              const observer = new MutationObserver(() => {
+                  // 1. Clean Math/LaTeX in ALL Text Nodes (Works inside <li>, <strong>, <p>, <div>)
+                  if (document.body) {
+                      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+                      let node;
+                      while ((node = walker.nextNode())) {
+                          const val = node.nodeValue;
+                          if (val && (val.includes('$') || val.includes('\\text') || val.includes('\\frac') || val.includes('\\times') || val.includes('\\sqrt') || val.includes('\\mu') || val.includes('\\triangle') || val.includes('^2') || val.includes('^3'))) {
+                              const parentTag = node.parentNode ? node.parentNode.tagName : '';
+                              if (parentTag !== 'SCRIPT' && parentTag !== 'STYLE') {
+                                  const cleaned = cleanMathText(val);
+                                  if (cleaned !== val) node.nodeValue = cleaned;
+                              }
+                          }
+                      }
+                  }
+
+                  // 2. Unlock Settings Page Scrolling
+                  fixSettingsScroll();
+
+                  // 3. Replace Boy Photo with Zoreno logo.png for Zoreno AI Official
+                  document.querySelectorAll('img').forEach(img => {
+                      const block = img.closest('div, li, header');
+                      const blockTxt = block ? (block.innerText || '') : '';
+                      if (blockTxt.includes('Zoreno AI') && !img.src.includes('logo.png')) {
+                          img.src = 'logo.png';
+                      }
+                  });
+
+                  // 4. Convert 24-Hour Chat Time to 12-Hour AM/PM (Skip Focus Sprint & Focus Music Timers!)
                   document.querySelectorAll('span, small, div, p').forEach(el => {
                       if (el.children.length === 0 && el.innerText) {
                           const txt = el.innerText.trim();
                           const match24 = txt.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
                           if (match24) {
-                              let h = parseInt(match24[1], 10);
-                              const m = match24[2];
-                              const ampm = h >= 12 ? 'PM' : 'AM';
-                              h = h % 12 || 12;
-                              el.innerText = String(h).padStart(2, '0') + ':' + m + ' ' + ampm;
-                          }
-                          if (txt.includes('$') || txt.includes('\\text') || txt.includes('\\mu') || txt.includes('\\triangle')) {
-                              el.innerText = cleanMathText(el.innerText);
+                              const parentBlock = el.closest('div, section, main');
+                              const parentTxt = parentBlock ? (parentBlock.innerText || '') : '';
+                              const isTimerOrMusic = parentTxt.includes('Focus Sprint') || parentTxt.includes('Focus Music') || parentTxt.includes('Stay calm') || parentTxt.includes('Stay focused');
+                              if (!isTimerOrMusic) {
+                                  let h = parseInt(match24[1], 10);
+                                  const m = match24[2];
+                                  const ampm = h >= 12 ? 'PM' : 'AM';
+                                  h = h % 12 || 12;
+                                  el.innerText = String(h).padStart(2, '0') + ':' + m + ' ' + ampm;
+                              }
                           }
                       }
                   });
 
-                  // 3. Hide "Delete for Everyone" on Received Messages (Only allow on Sent Messages)
+                  // 5. Hide "Delete for Everyone" on Received Messages
                   document.querySelectorAll('button, li, div, a').forEach(item => {
                       if (item.children.length === 0 && item.innerText) {
                           const t = item.innerText.trim().toLowerCase();
                           if (t.includes('delete') && t.includes('everyone')) {
-                              if (window.__lastSelectedMsgIsIncoming === true) {
-                                  item.style.display = 'none';
-                              } else {
-                                  item.style.display = '';
-                              }
+                              item.style.display = window.__lastSelectedMsgIsIncoming === true ? 'none' : '';
                           }
                       }
                   });
-
-                  // 4. Automatically Add "Continue with Google" Button Below Login Button
-                  const buttons = Array.from(document.querySelectorAll('button'));
-                  const loginBtn = buttons.find(b => b.innerText && b.innerText.trim().startsWith('Login'));
-                  if (loginBtn && !document.getElementById('zoreno-google-login-btn')) {
-                      const wrap = document.createElement('div');
-                      wrap.className = 'zoreno-google-btn-wrap';
-                      wrap.innerHTML = `
-                          <div class="zoreno-or-divider"><span>OR</span></div>
-                          <button type="button" id="zoreno-google-login-btn" class="zoreno-google-btn">
-                              <svg width="20" height="20" viewBox="0 0 48 48">
-                                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
-                                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
-                                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
-                                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
-                              </svg>
-                              <span>Continue with Google</span>
-                          </button>
-                      `;
-                      loginBtn.parentNode.insertBefore(wrap, loginBtn.nextSibling);
-                      document.getElementById('zoreno-google-login-btn').addEventListener('click', async () => {
-                          try {
-                              if (window.firebase && firebase.auth) {
-                                  const provider = new firebase.auth.GoogleAuthProvider();
-                                  await firebase.auth().signInWithPopup(provider);
-                              } else if (typeof window.signInWithGoogle === 'function') {
-                                  window.signInWithGoogle();
-                              } else if (typeof window.googleLogin === 'function') {
-                                  window.googleLogin();
-                              }
-                          } catch (err) {
-                              if (err && err.code === 'auth/account-exists-with-different-credential') {
-                                  alert('यह ईमेल पहले से पासवर्ड से जुड़ा है। एक बार ईमेल-पासवर्ड से लॉगिन करें, दोनों अकाउंट अपने-आप सिंक हो जाएंगे।');
-                              }
-                          }
-                      });
-                  }
               });
 
               observer.observe(document.documentElement, { childList: true, subtree: true });
 
-              // Detect whether message clicked/long-pressed is sent by user or received from friend
               const checkMsgOwner = function(e) {
                   const bubble = e.target.closest('[class*="msg"], [class*="message"], [class*="bubble"]');
                   if (bubble) {
@@ -522,10 +606,11 @@ jobs:
           })();
           EOF
 
-          # 10. Inject zoreno-fixes.css and zoreno-fixes.js into all HTML files automatically
+          # 10. Inject zoreno-fixes.css, inline splash div, and zoreno-fixes.js into all HTML files
           for htmlfile in app/src/main/assets/*.html; do
             if [ -f "$htmlfile" ]; then
               sed -i 's/<\/head>/<link rel="stylesheet" href="zoreno-fixes.css"><\/head>/i' "$htmlfile"
+              sed -i 's/<body[^>]*>/&<div id="zoreno-custom-splash"><\/div>/i' "$htmlfile"
               sed -i 's/<\/body>/<script src="zoreno-fixes.js"><\/script><\/body>/i' "$htmlfile"
             fi
           done
