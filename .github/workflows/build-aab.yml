@@ -25,7 +25,7 @@ jobs:
           gradle-version: '8.9'
           cache-disabled: true
 
-      - name: Setup Clean Project Structure and Build
+      - name: Setup Clean Project Structure, Auto-Patch Java/JS/HTML and Build
         run: |
           # 0. Purane build folders saaf karein aur agar zip hai toh extract karein
           rm -rf app build .gradle gradle libs.versions.toml
@@ -42,15 +42,13 @@ jobs:
             PKG_NAME="com.zoreno.app"
           fi
           PKG_DIR=$(echo "$PKG_NAME" | tr '.' '/')
-          echo "Detected Code Namespace: $PKG_NAME"
 
-          # Play Store com.example allow nahi karta, isliye final App ID com.zoreno.app rakhein
           if [[ "$PKG_NAME" == com.example* ]]; then
             APP_ID="com.zoreno.app"
           else
             APP_ID="$PKG_NAME"
           fi
-          echo "Play Store Application ID: $APP_ID"
+          echo "Detected Code Namespace: $PKG_NAME \vert{} Play Store App ID:$APP_ID"
 
           # 2. Sahi Android folders banayein
           mkdir -p "app/src/main/java/$PKG_DIR"
@@ -64,15 +62,12 @@ jobs:
 
           # 3. Code, Manifest aur Web Assets move karein
           cp *.java "app/src/main/java/$PKG_DIR/" 2>/dev/null || true
-          if [ -f "AndroidManifest.xml" ]; then
-            cp AndroidManifest.xml app/src/main/AndroidManifest.xml
-            sed -i 's/package="[^"]*"//g' app/src/main/AndroidManifest.xml
-          fi
           cp *.html *.css *.js metadata.json app/src/main/assets/ 2>/dev/null || true
+          cp logo.png splash.png app/src/main/assets/ 2>/dev/null || true
           [ -d "sounds" ] && cp -r sounds app/src/main/assets/ || true
 
           # 4. XML aur Image Resources sahi folders me move karein
-          cp colors.xml themes.xml strings.xml styles.xml dimens.xml app/src/main/res/values/ 2>/dev/null || true
+          cp colors.xml strings.xml styles.xml dimens.xml app/src/main/res/values/ 2>/dev/null || true
           cp activity_*.xml app/src/main/res/layout/ 2>/dev/null || true
           cp backup_rules.xml data_extraction_rules.xml network_security_config.xml file_paths.xml app/src/main/res/xml/ 2>/dev/null || true
 
@@ -82,7 +77,460 @@ jobs:
           cp ic_launcher.webp ic_launcher_round.webp app/src/main/res/mipmap-xxhdpi/ 2>/dev/null || true
           [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
 
-          # 5. Play Store ke liye Release Keystore generate karein
+          # 5. AUTOMATIC JAVA PATCH: MainActivity.java me Black Status Bar, 3-Button Nav Insets aur Razorpay Fallback lagayein
+          python3 - << 'PYEOF'
+          import glob, re
+
+          for java_file in glob.glob("app/src/main/java/**/*.java", recursive=True):
+              with open(java_file, "r", encoding="utf-8", errors="ignore") as f:
+                  code = f.read()
+
+              if "class MainActivity" in code:
+                  # A. Inject System Bars & 3-Button Navigation Inset Handling right after super.onCreate(...)
+                  inset_code = """
+                  androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
+                  getWindow().setStatusBarColor(android.graphics.Color.BLACK);
+                  getWindow().setNavigationBarColor(android.graphics.Color.BLACK);
+                  android.view.View rootContentView = findViewById(android.R.id.content);
+                  if (rootContentView != null) {
+                      androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(rootContentView, (v, insets) -> {
+                          androidx.core.graphics.Insets bars = insets.getInsets(
+                              androidx.core.view.WindowInsetsCompat.Type.systemBars() |
+                              androidx.core.view.WindowInsetsCompat.Type.ime()
+                          );
+                          v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+                          return androidx.core.view.WindowInsetsCompat.CONSUMED;
+                      });
+                  }
+                  """
+                  if "setOnApplyWindowInsetsListener(rootContentView" not in code:
+                      code = re.sub(
+                          r'(super\.onCreate\s*\([^)]*\)\s*;)',
+                          r'\1\n' + inset_code,
+                          code,
+                          count=1
+                      )
+
+                  # B. If Play Console product not found or installed from Indus Appstore, auto-trigger WebView Razorpay fallback
+                  code = re.sub(
+                      r'Toast\.makeText\([^;]*Subscription product not found on Play Console[^;]*\)\.show\(\);',
+                      r'runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript("if(typeof window.triggerRazorpayFallback===\'function\'){window.triggerRazorpayFallback();}", null); });',
+                      code
+                  )
+
+                  with open(java_file, "w", encoding="utf-8") as f:
+                      f.write(code)
+                  print("Successfully auto-patched MainActivity.java")
+          PYEOF
+
+          # 6. Clean themes.xml (Black Status Bar & Navigation Bar, No Edge-to-Edge Overlap)
+          cat << 'EOF' > app/src/main/res/values/themes.xml
+          <resources xmlns:tools="http://schemas.android.com/tools">
+              <style name="Theme.Zoreno" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+                  <item name="android:statusBarColor">#000000</item>
+                  <item name="android:navigationBarColor">#000000</item>
+                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:windowFullscreen">false</item>
+                  <item name="android:fitsSystemWindows">true</item>
+                  <item name="android:windowBackground">@drawable/splash</item>
+              </style>
+          </resources>
+          EOF
+
+          # 7. AndroidManifest.xml me adjustResize aur Theme fix karein
+          if [ -f "AndroidManifest.xml" ]; then
+            cp AndroidManifest.xml app/src/main/AndroidManifest.xml
+            sed -i 's/package="[^"]*"//g' app/src/main/AndroidManifest.xml
+            sed -i 's/android:theme="[^"]*"/android:theme="@style\/Theme.Zoreno"/g' app/src/main/AndroidManifest.xml
+            if ! grep -q "windowSoftInputMode" app/src/main/AndroidManifest.xml; then
+              sed -i 's/<activity /<activity android:windowSoftInputMode="adjustResize" /g' app/src/main/AndroidManifest.xml
+            else
+              sed -i 's/android:windowSoftInputMode="[^"]*"/android:windowSoftInputMode="adjustResize"/g' app/src/main/AndroidManifest.xml
+            fi
+          fi
+
+          # 8. Zoreno Automatic CSS Fixes banayein
+          cat << 'EOF' > app/src/main/assets/zoreno-fixes.css
+          /* 1. Screen Fit, Status Bar & 3-Button/Gesture Nav Safe Area Fix */
+          html, body {
+              width: 100% !important;
+              height: 100dvh !important;
+              max-height: 100dvh !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              overflow: hidden !important;
+              box-sizing: border-box !important;
+          }
+
+          /* 2. Keyboard खुलने पर Header गायब न हो */
+          .chat-screen, .ai-chat-screen, #chat-container, .main-wrapper {
+              display: flex !important;
+              flex-direction: column !important;
+              height: 100dvh !important;
+              max-height: 100dvh !important;
+              overflow: hidden !important;
+          }
+          .chat-header, header, .top-bar {
+              flex-shrink: 0 !important;
+              position: sticky !important;
+              top: 0 !important;
+              z-index: 100 !important;
+          }
+          .messages-container, .chat-messages, #messages {
+              flex: 1 1 auto !important;
+              overflow-y: auto !important;
+              padding-bottom: 12px !important;
+          }
+          .chat-input-bar, .input-area {
+              flex-shrink: 0 !important;
+              margin-bottom: env(safe-area-inset-bottom, 0px) !important;
+          }
+
+          /* 3. Bottom Floating Bar (4 Tabs) 3-Button Navigation से ऊपर रहे */
+          .bottom-nav, .floating-nav, nav.bottom-bar {
+              bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
+              z-index: 999 !important;
+          }
+          body.keyboard-open .bottom-nav,
+          body.keyboard-open .floating-nav,
+          body.keyboard-open nav.bottom-bar {
+              display: none !important;
+          }
+
+          /* 4. Focus Music Mode में 10 बटनों के बीच का गैप सही करें */
+          .music-grid, .sounds-grid, .focus-music-list, [class*="music"] .grid {
+              display: grid !important;
+              grid-template-columns: repeat(2, 1fr) !important;
+              gap: 10px !important;
+              align-content: start !important;
+              height: auto !important;
+              flex: 0 0 auto !important;
+              padding-bottom: 85px !important;
+          }
+          .music-card, .sound-item {
+              padding: 12px 14px !important;
+              min-height: 56px !important;
+              max-height: 66px !important;
+          }
+
+          /* 5. Full Screen Custom Splash Screen Overlay (No White Flash) */
+          #zoreno-custom-splash {
+              position: fixed;
+              inset: 0;
+              background: #0f0c29 url('splash.png') no-repeat center center;
+              background-size: cover;
+              z-index: 999999;
+              transition: opacity 0.4s ease;
+          }
+
+          /* 6. Official Google Sign-In Button Styling */
+          .zoreno-google-btn-wrap {
+              width: 100%;
+              margin-top: 12px;
+              margin-bottom: 8px;
+              text-align: center;
+          }
+          .zoreno-or-divider {
+              display: flex;
+              align-items: center;
+              text-align: center;
+              color: #888;
+              font-size: 12px;
+              margin: 10px 0;
+          }
+          .zoreno-or-divider::before, .zoreno-or-divider::after {
+              content: '';
+              flex: 1;
+              border-bottom: 1px solid #e0e0e0;
+          }
+          .zoreno-or-divider span {
+              padding: 0 12px;
+              font-weight: 600;
+          }
+          .zoreno-google-btn {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 10px;
+              width: 100%;
+              padding: 12px 16px;
+              background: #ffffff;
+              color: #1f1f1f;
+              border: 1px solid #dcdcdc;
+              border-radius: 999px;
+              font-size: 15px;
+              font-weight: 600;
+              cursor: pointer;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+          }
+          .zoreno-google-btn:active {
+              transform: scale(0.98);
+              background: #f5f5f5;
+          }
+          EOF
+
+          # 9. Zoreno Automatic JS Fixes banayein
+          cat << 'EOF' > app/src/main/assets/zoreno-fixes.js
+          (function() {
+              // --- A. SPLASH SCREEN OVERLAY (NO WHITE SCREEN) ---
+              const splash = document.createElement('div');
+              splash.id = 'zoreno-custom-splash';
+              document.documentElement.appendChild(splash);
+              window.addEventListener('load', () => {
+                  setTimeout(() => {
+                      splash.style.opacity = '0';
+                      setTimeout(() => splash.remove(), 400);
+                  }, 1000);
+              });
+
+              // --- B. KEYBOARD DETECTOR FOR FLOATING NAV & HEADER ---
+              if (window.visualViewport) {
+                  const initialHeight = window.visualViewport.height;
+                  window.visualViewport.addEventListener('resize', () => {
+                      if (window.visualViewport.height < initialHeight * 0.78) {
+                          document.body.classList.add('keyboard-open');
+                      } else {
+                          document.body.classList.remove('keyboard-open');
+                      }
+                  });
+              }
+
+              // --- C. AUTO-FIX AMAZON AFFILIATE LINKS (NO 404 ERROR) ---
+              document.addEventListener('click', function(e) {
+                  const buyEl = e.target.closest('a, button');
+                  if (!buyEl) return;
+                  const btnText = (buyEl.innerText || '').trim().toLowerCase();
+                  const href = buyEl.getAttribute('href') || '';
+                  if (btnText.includes('buy') || href.includes('amazon') || href.includes('amzn')) {
+                      // Extract existing affiliate tag from page scripts if available
+                      let affiliateTag = 'zoreno-21';
+                      const scriptsText = Array.from(document.querySelectorAll('script')).map(s => s.innerHTML).join(' ');
+                      const tagMatch = scriptsText.match(/tag=([a-zA-Z0-9_-]+-21)/);
+                      if (tagMatch && tagMatch[1]) affiliateTag = tagMatch[1];
+
+                      // Find product title from the recommendation card
+                      const card = buyEl.closest('div');
+                      let productTitle = 'Study Stationery Pen Notebook';
+                      if (card) {
+                          const lines = card.innerText.split('\n').map(l => l.trim()).filter(Boolean);
+                          const filtered = lines.filter(l => !l.toUpperCase().includes('RECOMMENDED') && !l.toLowerCase().includes('buy') && !l.toLowerCase().includes('best for'));
+                          if (filtered.length > 0) productTitle = filtered[0];
+                      }
+
+                      // If URL is broken, short-link 404, or invalid, route to working Amazon Affiliate Search URL
+                      if (!href || href === '#' || href.includes('undefined') || href.includes('amzn.to') || !href.includes('amazon.in/dp/')) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const safeAmazonUrl = 'https://www.amazon.in/s?k=' + encodeURIComponent(productTitle) + '&tag=' + affiliateTag;
+                          window.open(safeAmazonUrl, '_blank');
+                      }
+                  }
+              }, true);
+
+              // --- D. CLEAN MATH / LATEX ($ AND \text FIX) ---
+              function cleanMathText(text) {
+                  if (!text || typeof text !== 'string') return text;
+                  return text
+                      .replace(/\\\$/g, '')
+                      .replace(/\$\$/g, '')
+                      .replace(/\$/g, '')
+                      .replace(/\\triangle/g, 'Δ')
+                      .replace(/\\Delta/g, 'Δ')
+                      .replace(/\\angle/g, '∠')
+                      .replace(/\\circ/g, '°')
+                      .replace(/\^\{?\\circ\}?/g, '°')
+                      .replace(/\^°/g, '°')
+                      .replace(/\\mu_k/g, 'μₖ')
+                      .replace(/\\mu_s/g, 'μₛ')
+                      .replace(/\\mu/g, 'μ')
+                      .replace(/\\tau/g, 'τ')
+                      .replace(/\\alpha/g, 'α')
+                      .replace(/\\beta/g, 'β')
+                      .replace(/\\theta/g, 'θ')
+                      .replace(/\\pi/g, 'π')
+                      .replace(/\\cdot/g, '×')
+                      .replace(/\\times/g, '×')
+                      .replace(/\\div/g, '÷')
+                      .replace(/\\pm/g, '±')
+                      .replace(/\\leq/g, '≤')
+                      .replace(/\\geq/g, '≥')
+                      .replace(/\\neq/g, '≠')
+                      .replace(/\\approx/g, '≈')
+                      .replace(/\\sqrt\{([^}]+)\}/g, '√($1)') .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, '($1/$2)') .replace(/\\text\{([^}]*)\}/g, '$1')
+                      .replace(/[\u4e00-\u9fff]+/g, 'स्लाइडिंग (Sliding)');
+              }
+
+              // --- E. AI FETCH INTERCEPTOR (2048 TOKENS + JEE/NEET PROMPT + CLEAN MATH) ---
+              const origFetch = window.fetch;
+              window.fetch = async function(url, options) {
+                  if (typeof url === 'string' && (url.includes('generativelanguage') || url.includes('openai') || url.includes('chat') || url.includes('completions'))) {
+                      try {
+                          if (options && options.body) {
+                              let body = JSON.parse(options.body);
+                              const expertRule = "IMPORTANT: You are Zoreno AI, an expert tutor for NEET, IIT-JEE, UPSC and school exams. Solve Physics, Chemistry, Math and Biology problems step-by-step with clear calculations and complete final answers. NEVER use raw LaTeX dollar signs ($) or \\text{}. Use clean Unicode math symbols like ΔABC, ∠A = 70°, μ = 0.2, τ = F × R, √x, x². Never use Chinese characters.";
+                              if (body.generationConfig) {
+                                  body.generationConfig.maxOutputTokens = 2048;
+                              } else if (body.contents) {
+                                  body.generationConfig = { maxOutputTokens: 2048, temperature: 0.7 };
+                              }
+                              if (body.max_tokens) {
+                                  body.max_tokens = 2048;
+                              }
+                              if (body.systemInstruction && body.systemInstruction.parts) {
+                                  body.systemInstruction.parts[0].text += "\n" + expertRule;
+                              }
+                              options.body = JSON.stringify(body);
+                          }
+                      } catch (err) {}
+                  }
+                  return origFetch.apply(this, arguments);
+              };
+
+              // --- F. DAILY CHAT QUOTA (MIDNIGHT RESET + REWARDED +3 FOR FREE/PLUS/PRO) ---
+              function getLocalToday() {
+                  const d = new Date();
+                  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+              }
+              const todayStr = getLocalToday();
+              const lastSavedDate = localStorage.getItem('zoreno_strict_quota_date');
+              if (lastSavedDate !== todayStr) {
+                  localStorage.setItem('zoreno_strict_quota_date', todayStr);
+              } else {
+                  // Prevent same-day morning reset of used chats count
+                  const cachedUsed = localStorage.getItem('zoreno_strict_used_chats');
+                  if (cachedUsed && parseInt(cachedUsed, 10) >= 10) {
+                      for (let i = 0; i < localStorage.length; i++) {
+                          const k = localStorage.key(i);
+                          if (k && (k.toLowerCase().includes('chat') || k.toLowerCase().includes('count') || k.toLowerCase().includes('limit'))) {
+                              const val = localStorage.getItem(k);
+                              if (val === '0') localStorage.setItem(k, cachedUsed);
+                          }
+                      }
+                  }
+              }
+
+              // --- G. RAZORPAY FALLBACK FOR INDUS APPSTORE & UNPUBLISHED PLAY BILLING ---
+              window.triggerRazorpayFallback = function() {
+                  if (typeof window.openRazorpay === 'function') {
+                      window.openRazorpay();
+                  } else if (typeof window.startRazorpayPayment === 'function') {
+                      window.startRazorpayPayment();
+                  } else if (window.Razorpay) {
+                      const upgBtn = document.querySelector('[class*="upgrade"], button');
+                      if (upgBtn) upgBtn.click();
+                  }
+              };
+
+              // --- H. DOM OBSERVER: LOGO.PNG, 12-HOUR AM/PM, DELETE FOR EVERYONE & GOOGLE SIGN-IN ---
+              const observer = new MutationObserver(() => {
+                  // 1. Replace Boy Photo with Zoreno logo.png for Zoreno AI Official
+                  document.querySelectorAll('img').forEach(img => {
+                      const block = img.closest('div, li, header');
+                      const blockTxt = block ? (block.innerText || '') : '';
+                      if (blockTxt.includes('Zoreno AI') || (img.alt && img.alt.includes('Zoreno AI')) || img.src.includes('unsplash') || img.src.includes('pravatar') || img.src.includes('randomuser')) {
+                          if (blockTxt.includes('Zoreno AI') && !img.src.includes('logo.png')) {
+                              img.src = 'logo.png';
+                          }
+                      }
+                  });
+
+                  // 2. Convert 24-Hour Time (e.g. 22:40, 16:00) to 12-Hour AM/PM & Clean Math ($)
+                  document.querySelectorAll('span, small, div, p').forEach(el => {
+                      if (el.children.length === 0 && el.innerText) {
+                          const txt = el.innerText.trim();
+                          const match24 = txt.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
+                          if (match24) {
+                              let h = parseInt(match24[1], 10);
+                              const m = match24[2];
+                              const ampm = h >= 12 ? 'PM' : 'AM';
+                              h = h % 12 || 12;
+                              el.innerText = String(h).padStart(2, '0') + ':' + m + ' ' + ampm;
+                          }
+                          if (txt.includes('$') || txt.includes('\\text') || txt.includes('\\mu') || txt.includes('\\triangle')) {
+                              el.innerText = cleanMathText(el.innerText);
+                          }
+                      }
+                  });
+
+                  // 3. Hide "Delete for Everyone" on Received Messages (Only allow on Sent Messages)
+                  document.querySelectorAll('button, li, div, a').forEach(item => {
+                      if (item.children.length === 0 && item.innerText) {
+                          const t = item.innerText.trim().toLowerCase();
+                          if (t.includes('delete') && t.includes('everyone')) {
+                              if (window.__lastSelectedMsgIsIncoming === true) {
+                                  item.style.display = 'none';
+                              } else {
+                                  item.style.display = '';
+                              }
+                          }
+                      }
+                  });
+
+                  // 4. Automatically Add "Continue with Google" Button Below Login Button
+                  const buttons = Array.from(document.querySelectorAll('button'));
+                  const loginBtn = buttons.find(b => b.innerText && b.innerText.trim().startsWith('Login'));
+                  if (loginBtn && !document.getElementById('zoreno-google-login-btn')) {
+                      const wrap = document.createElement('div');
+                      wrap.className = 'zoreno-google-btn-wrap';
+                      wrap.innerHTML = `
+                          <div class="zoreno-or-divider"><span>OR</span></div>
+                          <button type="button" id="zoreno-google-login-btn" class="zoreno-google-btn">
+                              <svg width="20" height="20" viewBox="0 0 48 48">
+                                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                              </svg>
+                              <span>Continue with Google</span>
+                          </button>
+                      `;
+                      loginBtn.parentNode.insertBefore(wrap, loginBtn.nextSibling);
+                      document.getElementById('zoreno-google-login-btn').addEventListener('click', async () => {
+                          try {
+                              if (window.firebase && firebase.auth) {
+                                  const provider = new firebase.auth.GoogleAuthProvider();
+                                  await firebase.auth().signInWithPopup(provider);
+                              } else if (typeof window.signInWithGoogle === 'function') {
+                                  window.signInWithGoogle();
+                              } else if (typeof window.googleLogin === 'function') {
+                                  window.googleLogin();
+                              }
+                          } catch (err) {
+                              if (err && err.code === 'auth/account-exists-with-different-credential') {
+                                  alert('यह ईमेल पहले से पासवर्ड से जुड़ा है। एक बार ईमेल-पासवर्ड से लॉगिन करें, दोनों अकाउंट अपने-आप सिंक हो जाएंगे।');
+                              }
+                          }
+                      });
+                  }
+              });
+
+              observer.observe(document.documentElement, { childList: true, subtree: true });
+
+              // Detect whether message clicked/long-pressed is sent by user or received from friend
+              const checkMsgOwner = function(e) {
+                  const bubble = e.target.closest('[class*="msg"], [class*="message"], [class*="bubble"]');
+                  if (bubble) {
+                      const cls = (bubble.className || '').toLowerCase();
+                      const rect = bubble.getBoundingClientRect();
+                      const isRightAligned = rect.left > (window.innerWidth * 0.25);
+                      window.__lastSelectedMsgIsIncoming = !(cls.includes('sent') || cls.includes('out') || cls.includes('self') || cls.includes('me') || isRightAligned);
+                  }
+              };
+              document.addEventListener('contextmenu', checkMsgOwner, true);
+              document.addEventListener('touchstart', checkMsgOwner, true);
+              document.addEventListener('mousedown', checkMsgOwner, true);
+          })();
+          EOF
+
+          # 10. Inject zoreno-fixes.css and zoreno-fixes.js into all HTML files automatically
+          for htmlfile in app/src/main/assets/*.html; do
+            if [ -f "$htmlfile" ]; then
+              sed -i 's/<\/head>/<link rel="stylesheet" href="zoreno-fixes.css"><\/head>/i' "$htmlfile"
+              sed -i 's/<\/body>/<script src="zoreno-fixes.js"><\/script><\/body>/i' "$htmlfile"
+            fi
+          done
+
+          # 11. Play Store ke liye Release Keystore generate karein
           rm -f app/zoreno-release-key.jks
           keytool -genkeypair -v \
             -keystore app/zoreno-release-key.jks \
@@ -90,7 +538,7 @@ jobs:
             -alias zoreno \
             -storepass Zoreno@2026 \
             -keypass Zoreno@2026 \
-            -dname "CN=Zoreno, OU=Mobile, O=Zoreno, L=Varanasi, S=UP, C=IN"
+            -dname "CN=Zoreno, OU=Mobile, O=Toko Platforms Private Limited, L=Varanasi, S=UP, C=IN"
 
           cat << 'EOF' > keystore-details.txt
           Keystore File: zoreno-release-key.jks
@@ -100,14 +548,13 @@ jobs:
           (Play Store par agle updates dalne ke liye is file aur password ko sambhal kar rakhein)
           EOF
 
-          # 6. Clean gradle.properties banayein
+          # 12. Clean gradle.properties, settings.gradle.kts & build.gradle.kts
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
           android.nonTransitiveRClass=true
           EOF
 
-          # 7. Clean settings.gradle.kts banayein
           cat << 'EOF' > settings.gradle.kts
           pluginManagement {
               repositories {
@@ -127,14 +574,12 @@ jobs:
           include(":app")
           EOF
 
-          # 8. Clean Root build.gradle.kts banayein (Stable AGP 8.7.3)
           cat << 'EOF' > build.gradle.kts
           plugins {
               id("com.android.application") version "8.7.3" apply false
           }
           EOF
 
-          # 9. Clean App app/build.gradle.kts banayein (With Google AdMob SDK & Release Signing)
           cat << EOF > app/build.gradle.kts
           plugins {
               id("com.android.application")
@@ -148,8 +593,8 @@ jobs:
                   applicationId = "$APP_ID"
                   minSdk = 24
                   targetSdk = 35
-                  versionCode = 1
-                  versionName = "1.0.0"
+                  versionCode = 2
+                  versionName = "1.0.1"
               }
 
               signingConfigs {
@@ -190,14 +635,12 @@ jobs:
               implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
               implementation("androidx.core:core-splashscreen:1.0.1")
               implementation("com.google.android.gms:play-services-ads:23.6.0")
+              implementation("com.google.android.gms:play-services-auth:21.2.0")
               implementation("com.android.billingclient:billing:7.1.1")
               implementation("com.google.code.gson:gson:2.11.0")
               implementation("androidx.browser:browser:1.8.0")
           }
           EOF
-
-          echo "=== Checking Java Imports ==="
-          grep "^import " "app/src/main/java/$PKG_DIR/"*.java || true
 
           echo "Running Clean Gradle Build..."
           gradle assembleDebug assembleRelease bundleRelease -x lint -x lintDebug
@@ -212,4 +655,3 @@ jobs:
             app/build/outputs/bundle/**/*.aab
             app/zoreno-release-key.jks
             keystore-details.txt
-            
