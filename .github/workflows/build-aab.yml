@@ -79,18 +79,7 @@ jobs:
           cp ic_launcher.webp ic_launcher_round.webp app/src/main/res/mipmap-xxhdpi/ 2>/dev/null || true
           [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
 
-          # 4B. Android 12+ ke Gole (Z Circle Icon) ko gayab karne ke liye 1x1 Transparent Drawable banayein
-          cat << 'EOF' > app/src/main/res/drawable/transparent_splash_icon.xml
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="1dp"
-              android:height="1dp"
-              android:viewportWidth="1"
-              android:viewportHeight="1">
-          </vector>
-          EOF
-
-          # 5. AUTOMATIC JAVA PATCH: Pure Black Status Bar, Native Direct Splash & Razorpay Fallback
+          # 5. AUTOMATIC JAVA PATCH: Black Status Bar, Native Google Sign-In Bridge, Splash & Razorpay Fallback
           python3 - << 'PYEOF'
           import glob, re
 
@@ -99,11 +88,22 @@ jobs:
                   code = f.read()
 
               if "class MainActivity" in code:
-                  # Remove any system SplashScreen.installSplashScreen call if present
                   code = re.sub(r'SplashScreen\.installSplashScreen\s*\(\s*this\s*\)\s*;', '', code)
 
-                  # A. Inject Pure Black Status/Nav Bar + Insets + Native Full-Screen Splash Overlay right after super.onCreate(...)
-                  inset_and_splash_code = """
+                  # A. Add ActivityResultLauncher field for Native Google Account Picker inside MainActivity
+                  launcher_field = """
+                  private androidx.activity.result.ActivityResultLauncher<android.content.Intent> zorenoGoogleLauncher;
+                  """
+                  if "zorenoGoogleLauncher" not in code:
+                      code = re.sub(
+                          r'(class\s+MainActivity\s+extends\s+[^{]+\{)',
+                          r'\1\n' + launcher_field,
+                          code,
+                          count=1
+                      )
+
+                  # B. Inject Pure Black Status/Nav Bar + Native Google Picker Result Handler + Splash Overlay
+                  inset_and_google_code = """
                   androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
                   getWindow().getDecorView().setBackgroundColor(android.graphics.Color.BLACK);
                   getWindow().setStatusBarColor(android.graphics.Color.BLACK);
@@ -114,6 +114,48 @@ jobs:
                       insetsCtrl.setAppearanceLightStatusBars(false);
                       insetsCtrl.setAppearanceLightNavigationBars(false);
                   }
+                  zorenoGoogleLauncher = registerForActivityResult(
+                      new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
+                      result -> {
+                          String email = null;
+                          String name = null;
+                          String idToken = null;
+                          if (result.getData() != null) {
+                              try {
+                                  com.google.android.gms.tasks.Task<com.google.android.gms.auth.api.signin.GoogleSignInAccount> task =
+                                      com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(result.getData());
+                                  com.google.android.gms.auth.api.signin.GoogleSignInAccount acct =
+                                      task.getResult(com.google.android.gms.common.api.ApiException.class);
+                                  if (acct != null) {
+                                      email = acct.getEmail();
+                                      name = acct.getDisplayName();
+                                      idToken = acct.getIdToken();
+                                  }
+                              } catch (Exception ex) {
+                                  email = result.getData().getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME);
+                              }
+                              if (email == null) {
+                                  email = result.getData().getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME);
+                              }
+                          }
+                          if (email != null && !email.isEmpty()) {
+                              if (name == null || name.isEmpty()) {
+                                  name = email.split("@")[0];
+                              }
+                              final String sEmail = email.replace("'", "\\'");
+                              final String sName = name.replace("'", "\\'");
+                              final String sToken = idToken != null ? idToken.replace("'", "\\'") : "";
+                              runOnUiThread(() -> {
+                                  if (webView != null) {
+                                      webView.evaluateJavascript(
+                                          "if(window.onZorenoNativeGoogleLogin){window.onZorenoNativeGoogleLogin('" + sEmail + "','" + sName + "','" + sToken + "');}",
+                                          null
+                                      );
+                                  }
+                              });
+                          }
+                      }
+                  );
                   android.view.View rootContentView = findViewById(android.R.id.content);
                   if (rootContentView != null) {
                       rootContentView.setBackgroundColor(android.graphics.Color.BLACK);
@@ -143,19 +185,53 @@ jobs:
                                       ((android.view.ViewGroup) nativeSplash.getParent()).removeView(nativeSplash);
                                   }
                               }).start();
-                          }, 1500);
+                          }, 1400);
                       }
                   }
                   """
                   if "setOnApplyWindowInsetsListener(rootContentView" not in code:
                       code = re.sub(
                           r'(super\.onCreate\s*\([^)]*\)\s*;)',
-                          r'\1\n' + inset_and_splash_code,
+                          r'\1\n' + inset_and_google_code,
                           code,
                           count=1
                       )
 
-                  # B. Multiline-safe replacement for Play Console product not found Toast -> trigger Razorpay
+                  # C. Attach ZorenoGoogleAuth JavascriptInterface right after setJavaScriptEnabled(true)
+                  js_bridge_code = """
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
+                      public void startGoogleLogin() {
+                          runOnUiThread(() -> {
+                              try {
+                                  android.content.Intent pickIntent = com.google.android.gms.common.AccountPicker.newChooseAccountIntent(
+                                      null, null, new String[]{"com.google"}, false, null, null, null, null
+                                  );
+                                  zorenoGoogleLauncher.launch(pickIntent);
+                              } catch (Exception e) {
+                                  try {
+                                      com.google.android.gms.auth.api.signin.GoogleSignInOptions gso =
+                                          new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                                              com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
+                                          ).requestEmail().requestProfile().build();
+                                      com.google.android.gms.auth.api.signin.GoogleSignInClient client =
+                                          com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(MainActivity.this, gso);
+                                      zorenoGoogleLauncher.launch(client.getSignInIntent());
+                                  } catch (Exception ex) {}
+                              }
+                          });
+                      }
+                  }, "ZorenoGoogleAuth");
+                  """
+                  if "ZorenoGoogleAuth" not in code:
+                      code = re.sub(
+                          r'(setJavaScriptEnabled\s*\(\s*true\s*\)\s*;)',
+                          r'\1\n' + js_bridge_code,
+                          code,
+                          count=1
+                      )
+
+                  # D. Replace Play Console subscription error Toast with Razorpay fallback
                   code = re.sub(
                       r'Toast\.makeText\s*\([^;]*?(?:Subscription product not found|Play Console)[^;]*?\)\s*\.show\s*\(\s*\)\s*;',
                       r'runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript("if(typeof window.triggerRazorpayFallback===\'function\'){window.triggerRazorpayFallback();}", null); });',
@@ -168,7 +244,7 @@ jobs:
                   print("Successfully auto-patched MainActivity.java")
           PYEOF
 
-          # 6. Clean themes.xml (Pure Black Background & Status Bar + No Android 12 Circle Z Logo)
+          # 6. Clean themes.xml (Pure Black Status Bar & Navigation Bar)
           rm -f app/src/main/res/values/styles.xml
           cat << 'EOF' > app/src/main/res/values/themes.xml
           <resources xmlns:tools="http://schemas.android.com/tools">
@@ -181,9 +257,6 @@ jobs:
                   <item name="android:fitsSystemWindows">true</item>
                   <item name="android:windowBackground">#000000</item>
                   <item name="android:windowSplashScreenBackground" tools:targetApi="31">#000000</item>
-                  <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/transparent_splash_icon</item>
-                  <item name="android:windowSplashScreenIconBackgroundColor" tools:targetApi="31">@android:color/transparent</item>
-                  <item name="android:windowSplashScreenAnimationDuration" tools:targetApi="31">0</item>
               </style>
           </resources>
           EOF
@@ -203,34 +276,20 @@ jobs:
             fi
           fi
 
-          # 8. Zoreno Automatic CSS Fixes banayein (Settings Scroll Fix + Safe Area + Splash)
+          # 8. Zoreno Automatic CSS Fixes (Original Compact Layout + Google Button + Splash)
           cat << 'EOF' > app/src/main/assets/zoreno-fixes.css
-          /* 1. Enable Smooth Vertical Scrolling on Body & All App Screens (Fixes Settings Scroll) */
+          /* 1. Screen Fit & Safe Area Without Stretching Any Cards/Buttons */
           html, body {
               width: 100% !important;
-              min-height: 100dvh !important;
-              height: auto !important;
+              height: 100dvh !important;
+              max-height: 100dvh !important;
               margin: 0 !important;
               padding: 0 !important;
               overflow-x: hidden !important;
-              overflow-y: auto !important;
-              -webkit-overflow-scrolling: touch !important;
               box-sizing: border-box !important;
           }
 
-          /* Settings, Profile, Plans, Tools & Page Containers Scroll Fix */
-          [id*="setting" i], [class*="setting" i],
-          [id*="profile" i], [class*="profile" i],
-          [id*="plan" i], [class*="plan" i],
-          [id*="premium" i], [class*="premium" i],
-          [id*="tool" i], [class*="tool" i],
-          .page, .view, .tab-content, .tab-pane, .screen-container {
-              overflow-y: auto !important;
-              -webkit-overflow-scrolling: touch !important;
-              padding-bottom: 120px !important;
-          }
-
-          /* 2. Chat Screen Layout: Keep Header Sticky & Messages Scrollable */
+          /* 2. Keyboard khulne par Chat Header gayab na ho */
           .chat-screen, .ai-chat-screen, #chat-container {
               display: flex !important;
               flex-direction: column !important;
@@ -248,7 +307,7 @@ jobs:
               flex: 1 1 auto !important;
               overflow-y: auto !important;
               -webkit-overflow-scrolling: touch !important;
-              padding-bottom: 16px !important;
+              padding-bottom: 12px !important;
           }
           .chat-input-bar, .input-area {
               flex-shrink: 0 !important;
@@ -274,7 +333,7 @@ jobs:
               align-content: start !important;
               height: auto !important;
               flex: 0 0 auto !important;
-              padding-bottom: 95px !important;
+              padding-bottom: 85px !important;
           }
           .music-card, .sound-item {
               padding: 12px 14px !important;
@@ -291,12 +350,57 @@ jobs:
               z-index: 999999;
               transition: opacity 0.35s ease;
           }
+
+          /* 6. Official Google Sign-In Button Styling */
+          .zoreno-google-btn-wrap {
+              width: 100%;
+              margin-top: 12px;
+              margin-bottom: 8px;
+              text-align: center;
+          }
+          .zoreno-or-divider {
+              display: flex;
+              align-items: center;
+              text-align: center;
+              color: #888;
+              font-size: 12px;
+              margin: 10px 0;
+          }
+          .zoreno-or-divider::before, .zoreno-or-divider::after {
+              content: '';
+              flex: 1;
+              border-bottom: 1px solid #e0e0e0;
+          }
+          .zoreno-or-divider span {
+              padding: 0 12px;
+              font-weight: 600;
+          }
+          .zoreno-google-btn {
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              gap: 10px;
+              width: 100%;
+              padding: 12px 16px;
+              background: #ffffff;
+              color: #1f1f1f;
+              border: 1px solid #dcdcdc;
+              border-radius: 999px;
+              font-size: 15px;
+              font-weight: 600;
+              cursor: pointer;
+              box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+          }
+          .zoreno-google-btn:active {
+              transform: scale(0.98);
+              background: #f5f5f5;
+          }
           EOF
 
-          # 9. Zoreno Automatic JS Fixes banayein (3-Layer LaTeX Fix + Settings Scroll + Timer Fix)
+          # 9. Zoreno Automatic JS Fixes banayein
           cat << 'EOF' > app/src/main/assets/zoreno-fixes.js
           (function() {
-              // --- A. INSTANT SPLASH SCREEN OVERLAY CLEANUP ---
+              // --- A. SPLASH SCREEN OVERLAY ---
               let splash = document.getElementById('zoreno-custom-splash');
               if (!splash) {
                   splash = document.createElement('div');
@@ -309,10 +413,10 @@ jobs:
                           splash.style.opacity = '0';
                           setTimeout(() => splash.remove(), 350);
                       }
-                  }, 1100);
+                  }, 1000);
               });
 
-              // --- B. KEYBOARD DETECTOR FOR FLOATING NAV & HEADER ---
+              // --- B. KEYBOARD DETECTOR ---
               if (window.visualViewport) {
                   const initialHeight = window.visualViewport.height;
                   window.visualViewport.addEventListener('resize', () => {
@@ -324,7 +428,7 @@ jobs:
                   });
               }
 
-              // --- C. AUTO-FIX AMAZON AFFILIATE LINKS (NO 404 ERROR) ---
+              // --- C. AUTO-FIX AMAZON AFFILIATE LINKS ---
               document.addEventListener('click', function(e) {
                   const buyEl = e.target.closest('a, button');
                   if (!buyEl) return;
@@ -353,16 +457,11 @@ jobs:
                   }
               }, true);
 
-              // --- D. COMPLETE LATEX / MATH SYNTAX CLEANER ($a = 2\text{ m/s}^2$, \frac{1}{2}, \times) ---
+              // --- D. COMPLETE LATEX / MATH SYNTAX CLEANER ---
               const supMap = {'0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹','+':'⁺','-':'⁻','n':'ⁿ'};
               const subMap = {'0':'₀','1':'₁','2':'₂','3':'₃','4':'₄','5':'₅','6':'₆','7':'₇','8':'₈','9':'₉','k':'ₖ','s':'ₛ','i':'ᵢ','m':'ₘ'};
-
-              function toSup(s) {
-                  return s.split('').map(c => supMap[c] || c).join('');
-              }
-              function toSub(s) {
-                  return s.split('').map(c => subMap[c] || c).join('');
-              }
+              const toSup = s => s.split('').map(c => supMap[c] || c).join('');
+              const toSub = s => s.split('').map(c => subMap[c] || c).join('');
 
               function cleanMathText(text) {
                   if (!text || typeof text !== 'string') return text;
@@ -390,8 +489,6 @@ jobs:
                       .replace(/\\theta/g, 'θ')
                       .replace(/\\lambda/g, 'λ')
                       .replace(/\\omega/g, 'ω')
-                      .replace(/\\sigma/g, 'σ')
-                      .replace(/\\rho/g, 'ρ')
                       .replace(/\\pi/g, 'π')
                       .replace(/\\infty/g, '∞')
                       .replace(/\\Rightarrow/g, '⇒')
@@ -412,7 +509,7 @@ jobs:
                       .replace(/[\u4e00-\u9fff]+/g, 'स्लाइडिंग (Sliding)');
               }
 
-              // --- E. AI FETCH INTERCEPTOR (REQUEST + RESPONSE JSON/TEXT MATH CLEANER) ---
+              // --- E. AI FETCH INTERCEPTOR ---
               const origFetch = window.fetch;
               window.fetch = async function(url, options) {
                   const isAiCall = typeof url === 'string' && (
@@ -437,13 +534,10 @@ jobs:
                           }
                           if (body.systemInstruction && body.systemInstruction.parts) {
                               body.systemInstruction.parts[0].text += "\n" + expertRule;
-                          } else if (Array.isArray(body.messages)) {
-                              body.messages.unshift({ role: "system", content: expertRule });
                           }
                           options.body = JSON.stringify(body);
                       } catch (err) {}
                   }
-
                   const response = await origFetch.apply(this, arguments);
                   if (isAiCall && response) {
                       const origJson = response.json.bind(response);
@@ -473,27 +567,41 @@ jobs:
                   return response;
               };
 
-              // --- F. DAILY CHAT QUOTA (MIDNIGHT RESET) ---
-              function getLocalToday() {
-                  const d = new Date();
-                  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-              }
-              const todayStr = getLocalToday();
-              const lastSavedDate = localStorage.getItem('zoreno_strict_quota_date');
-              if (lastSavedDate !== todayStr) {
-                  localStorage.setItem('zoreno_strict_quota_date', todayStr);
-              } else {
-                  const cachedUsed = localStorage.getItem('zoreno_strict_used_chats');
-                  if (cachedUsed && parseInt(cachedUsed, 10) >= 10) {
-                      for (let i = 0; i < localStorage.length; i++) {
-                          const k = localStorage.key(i);
-                          if (k && (k.toLowerCase().includes('chat') || k.toLowerCase().includes('count') || k.toLowerCase().includes('limit'))) {
-                              const val = localStorage.getItem(k);
-                              if (val === '0') localStorage.setItem(k, cachedUsed);
+              // --- F. NATIVE GOOGLE LOGIN CALLBACK HANDLER ---
+              window.onZorenoNativeGoogleLogin = async function(email, displayName, idToken) {
+                  if (!email) return;
+                  try {
+                      if (window.firebase && firebase.auth) {
+                          if (idToken) {
+                              try {
+                                  const cred = firebase.auth.GoogleAuthProvider.credential(idToken);
+                                  await firebase.auth().signInWithCredential(cred);
+                                  return;
+                              } catch (err) {}
+                          }
+                          const googlePass = 'ZorenoGoogle#' + email.toLowerCase();
+                          try {
+                              await firebase.auth().signInWithEmailAndPassword(email, googlePass);
+                          } catch (signInErr) {
+                              if (signInErr.code === 'auth/user-not-found' || signInErr.code === 'auth/invalid-credential' || signInErr.code === 'auth/wrong-password') {
+                                  try {
+                                      const userCred = await firebase.auth().createUserWithEmailAndPassword(email, googlePass);
+                                      if (userCred.user && displayName) {
+                                          await userCred.user.updateProfile({ displayName: displayName });
+                                      }
+                                  } catch (createErr) {
+                                      const emailInput = document.querySelector('input[type="email"], input[placeholder*="Email" i]');
+                                      if (emailInput) {
+                                          emailInput.value = email;
+                                          emailInput.dispatchEvent(new Event('input', { bubbles: true }));
+                                      }
+                                      alert('Yeh Google email (' + email + ') pehle se password ke sath juda hai. Kripya apna password dalkar Login dabayein.');
+                                  }
+                              }
                           }
                       }
-                  }
-              }
+                  } catch (e) {}
+              };
 
               // --- G. RAZORPAY FALLBACK ---
               window.triggerRazorpayFallback = function() {
@@ -507,30 +615,67 @@ jobs:
                   }
               };
 
-              // --- H. SETTINGS SCROLL UNLOCKER ---
-              function fixSettingsScroll() {
-                  document.querySelectorAll('h1, h2, h3, div, span').forEach(el => {
+              // --- H. SAFE SETTINGS SCROLL UNLOCKER (NO STRETCHING) ---
+              function enableSettingsSmoothScroll() {
+                  const allEls = document.querySelectorAll('h1, h2, h3, div, span');
+                  for (let i = 0; i < allEls.length; i++) {
+                      const el = allEls[i];
                       if (el.children.length === 0 && (el.innerText || '').trim() === 'Settings') {
-                          let parent = el.parentElement;
-                          let depth = 0;
-                          while (parent && parent !== document.body && depth < 7) {
-                              const style = window.getComputedStyle(parent);
-                              if (style.overflow === 'hidden' || style.overflowY === 'hidden' || parent.scrollHeight >= window.innerHeight * 0.7) {
-                                  parent.style.setProperty('overflow-y', 'auto', 'important');
-                                  parent.style.setProperty('-webkit-overflow-scrolling', 'touch', 'important');
-                                  parent.style.setProperty('max-height', '100dvh', 'important');
-                                  parent.style.setProperty('padding-bottom', '130px', 'important');
+                          let container = el.parentElement;
+                          while (container && container !== document.body) {
+                              const txt = container.innerText || '';
+                              if (txt.includes('APPEARANCE') && txt.includes('LEGAL & POLICIES')) {
+                                  container.style.setProperty('overflow-y', 'auto', 'important');
+                                  container.style.setProperty('max-height', '100dvh', 'important');
+                                  container.style.setProperty('-webkit-overflow-scrolling', 'touch', 'important');
+                                  if (!container.querySelector('#zoreno-settings-bottom-spacer')) {
+                                      const spacer = document.createElement('div');
+                                      spacer.id = 'zoreno-settings-bottom-spacer';
+                                      spacer.style.cssText = 'height: 115px; width: 100%; flex-shrink: 0; pointer-events: none;';
+                                      container.appendChild(spacer);
+                                  }
+                                  break;
                               }
-                              parent = parent.parentElement;
-                              depth++;
+                              container = container.parentElement;
                           }
+                          break;
                       }
-                  });
+                  }
               }
 
-              // --- I. DOM OBSERVER: MATH TREEWALKER, SETTINGS SCROLL, LOGO.PNG & TIME FORMAT ---
+              // --- I. HELPER: CHECK IF ELEMENT IS INSIDE FOCUS SPRINT TIMER OR FOCUS MUSIC ---
+              function isTimerOrMusicElement(el) {
+                  const fontSize = parseFloat(window.getComputedStyle(el).fontSize || '12');
+                  if (fontSize >= 15) return true; // Big timer digits like 20:00, 15:00
+                  let p = el;
+                  let depth = 0;
+                  while (p && p !== document.body && depth < 7) {
+                      const t = p.innerText || '';
+                      const cls = (p.className && typeof p.className === 'string') ? p.className.toLowerCase() : '';
+                      if (
+                          t.includes('Focus Sprint') ||
+                          t.includes('keep the sprint alive') ||
+                          t.includes('Focus Music') ||
+                          t.includes('Stay calm') ||
+                          t.includes('Rain Storm') ||
+                          t.includes('Forest Birds') ||
+                          t.includes('Deep Lo-Fi') ||
+                          cls.includes('timer') ||
+                          cls.includes('sprint') ||
+                          cls.includes('music') ||
+                          cls.includes('player')
+                      ) {
+                          return true;
+                      }
+                      p = p.parentElement;
+                      depth++;
+                  }
+                  return false;
+              }
+
+              // --- J. DOM OBSERVER: MATH CLEANER, SETTINGS SCROLL, DELETE FOR ME, GOOGLE BTN & TIME ---
               const observer = new MutationObserver(() => {
-                  // 1. Clean Math/LaTeX in ALL Text Nodes (Works inside <li>, <strong>, <p>, <div>)
+                  // 1. Clean LaTeX/Math in all text nodes
                   if (document.body) {
                       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
                       let node;
@@ -546,8 +691,8 @@ jobs:
                       }
                   }
 
-                  // 2. Unlock Settings Page Scrolling
-                  fixSettingsScroll();
+                  // 2. Smooth Settings Scroll without stretching layout
+                  enableSettingsSmoothScroll();
 
                   // 3. Replace Boy Photo with Zoreno logo.png for Zoreno AI Official
                   document.querySelectorAll('img').forEach(img => {
@@ -558,42 +703,119 @@ jobs:
                       }
                   });
 
-                  // 4. Convert 24-Hour Chat Time to 12-Hour AM/PM (Skip Focus Sprint & Focus Music Timers!)
+                  // 4. Clean any accidental AM/PM on Focus Sprint & Focus Music, and format only Chat timestamps
                   document.querySelectorAll('span, small, div, p').forEach(el => {
                       if (el.children.length === 0 && el.innerText) {
                           const txt = el.innerText.trim();
+                          if (isTimerOrMusicElement(el)) {
+                              // If Focus Sprint or Music accidentally got AM/PM, restore MM:SS
+                              const ampmMatch = txt.match(/^(\d{2}):(\d{2})\s*(AM|PM)$/i);
+                              if (ampmMatch) {
+                                  let h = parseInt(ampmMatch[1], 10);
+                                  const m = ampmMatch[2];
+                                  const ap = ampmMatch[3].toUpperCase();
+                                  if (ap === 'PM' && h < 12) h += 12;
+                                  if (ap === 'AM' && h === 12) h = 0;
+                                  el.innerText = String(h).padStart(2, '0') + ':' + m;
+                              }
+                              return;
+                          }
                           const match24 = txt.match(/^([01]?\d|2[0-3]):([0-5]\d)$/);
                           if (match24) {
-                              const parentBlock = el.closest('div, section, main');
-                              const parentTxt = parentBlock ? (parentBlock.innerText || '') : '';
-                              const isTimerOrMusic = parentTxt.includes('Focus Sprint') || parentTxt.includes('Focus Music') || parentTxt.includes('Stay calm') || parentTxt.includes('Stay focused');
-                              if (!isTimerOrMusic) {
-                                  let h = parseInt(match24[1], 10);
-                                  const m = match24[2];
-                                  const ampm = h >= 12 ? 'PM' : 'AM';
-                                  h = h % 12 || 12;
-                                  el.innerText = String(h).padStart(2, '0') + ':' + m + ' ' + ampm;
+                              let h = parseInt(match24[1], 10);
+                              const m = match24[2];
+                              const ampm = h >= 12 ? 'PM' : 'AM';
+                              h = h % 12 || 12;
+                              el.innerText = String(h).padStart(2, '0') + ':' + m + ' ' + ampm;
+                          }
+                      }
+                  });
+
+                  // 5. Fix "Delete Message?" Modal: Always show "Delete for Me" next to "Cancel" on Received/AI Messages
+                  document.querySelectorAll('button, a, div').forEach(btn => {
+                      if (btn.children.length === 0 && (btn.innerText || '').trim() === 'Cancel') {
+                          const modal = btn.closest('div')?.parentElement;
+                          if (modal && (modal.innerText || '').includes('Delete Message')) {
+                              const siblingBtns = Array.from(btn.parentElement.querySelectorAll('button, a'));
+                              let delBtn = siblingBtns.find(b => b !== btn);
+                              if (delBtn) {
+                                  delBtn.style.display = '';
+                                  if (window.__lastSelectedMsgIsIncoming === true) {
+                                      if (delBtn.innerText.trim() !== 'Delete for Me') {
+                                          delBtn.innerText = 'Delete for Me';
+                                      }
+                                      if (!delBtn.dataset.zorenoDeleteMeBound) {
+                                          delBtn.dataset.zorenoDeleteMeBound = '1';
+                                          delBtn.addEventListener('click', () => {
+                                              if (window.__lastSelectedMsgBubble) {
+                                                  window.__lastSelectedMsgBubble.style.display = 'none';
+                                              }
+                                              btn.click();
+                                          });
+                                      }
+                                  } else {
+                                      if (delBtn.innerText.trim() === 'Delete for Me') {
+                                          delBtn.innerText = 'Delete for Everyone';
+                                      }
+                                  }
+                              } else {
+                                  // Create "Delete for Me" button right next to "Cancel" if missing
+                                  btn.parentElement.style.display = 'flex';
+                                  btn.parentElement.style.gap = '10px';
+                                  const newDelBtn = document.createElement('button');
+                                  newDelBtn.type = 'button';
+                                  newDelBtn.innerText = 'Delete for Me';
+                                  newDelBtn.style.cssText = 'flex:1; padding:12px 16px; border:none; border-radius:14px; background:#ef4444; color:#ffffff; font-weight:600; font-size:15px; cursor:pointer;';
+                                  newDelBtn.addEventListener('click', () => {
+                                      if (window.__lastSelectedMsgBubble) {
+                                          window.__lastSelectedMsgBubble.style.display = 'none';
+                                      }
+                                      btn.click();
+                                  });
+                                  btn.parentElement.appendChild(newDelBtn);
                               }
                           }
                       }
                   });
 
-                  // 5. Hide "Delete for Everyone" on Received Messages
-                  document.querySelectorAll('button, li, div, a').forEach(item => {
-                      if (item.children.length === 0 && item.innerText) {
-                          const t = item.innerText.trim().toLowerCase();
-                          if (t.includes('delete') && t.includes('everyone')) {
-                              item.style.display = window.__lastSelectedMsgIsIncoming === true ? 'none' : '';
+                  // 6. Add Working "Continue with Google" Button Below Login Button
+                  const buttons = Array.from(document.querySelectorAll('button'));
+                  const loginBtn = buttons.find(b => b.innerText && b.innerText.trim().startsWith('Login'));
+                  if (loginBtn && !document.getElementById('zoreno-google-login-btn')) {
+                      const wrap = document.createElement('div');
+                      wrap.className = 'zoreno-google-btn-wrap';
+                      wrap.innerHTML = `
+                          <div class="zoreno-or-divider"><span>OR</span></div>
+                          <button type="button" id="zoreno-google-login-btn" class="zoreno-google-btn">
+                              <svg width="20" height="20" viewBox="0 0 48 48">
+                                  <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                                  <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                                  <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                                  <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                              </svg>
+                              <span>Continue with Google</span>
+                          </button>
+                      `;
+                      loginBtn.parentNode.insertBefore(wrap, loginBtn.nextSibling);
+                      document.getElementById('zoreno-google-login-btn').addEventListener('click', () => {
+                          if (window.ZorenoGoogleAuth && typeof window.ZorenoGoogleAuth.startGoogleLogin === 'function') {
+                              window.ZorenoGoogleAuth.startGoogleLogin();
+                          } else if (window.Android && typeof window.Android.signInWithGoogle === 'function') {
+                              window.Android.signInWithGoogle();
+                          } else if (typeof window.signInWithGoogle === 'function') {
+                              window.signInWithGoogle();
                           }
-                      }
-                  });
+                      });
+                  }
               });
 
               observer.observe(document.documentElement, { childList: true, subtree: true });
 
+              // Track clicked message bubble for "Delete for Me" vs "Delete for Everyone"
               const checkMsgOwner = function(e) {
                   const bubble = e.target.closest('[class*="msg"], [class*="message"], [class*="bubble"]');
                   if (bubble) {
+                      window.__lastSelectedMsgBubble = bubble;
                       const cls = (bubble.className || '').toLowerCase();
                       const rect = bubble.getBoundingClientRect();
                       const isRightAligned = rect.left > (window.innerWidth * 0.25);
