@@ -79,13 +79,20 @@ jobs:
           cp ic_launcher.webp ic_launcher_round.webp app/src/main/res/mipmap-xxhdpi/ 2>/dev/null || true
           [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
 
-          # 5. AUTOMATIC JAVA PATCH: Black Status Bar, Native Google Sign-In Bridge, Splash & Razorpay Fallback
+          # 5. AUTOMATIC JAVA PATCH: Black Status Bar, Native Google Sign-In Bridge, Splash, Razorpay Fallback & Billing 8.0.0 Fix
           python3 - << 'PYEOF'
           import glob, re
 
           for java_file in glob.glob("app/src/main/java/**/*.java", recursive=True):
               with open(java_file, "r", encoding="utf-8", errors="ignore") as f:
                   code = f.read()
+
+              # Auto-upgrade BillingClient 7.x methods to Billing 8.0.0 compatible methods
+              code = re.sub(
+                  r'\.enablePendingPurchases\s*\(\s*\)',
+                  '.enablePendingPurchases(com.android.billingclient.api.PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())',
+                  code
+              )
 
               if "class MainActivity" in code:
                   code = re.sub(r'SplashScreen\.installSplashScreen\s*\(\s*this\s*\)\s*;', '', code)
@@ -239,9 +246,9 @@ jobs:
                       flags=re.DOTALL
                   )
 
-                  with open(java_file, "w", encoding="utf-8") as f:
-                      f.write(code)
-                  print("Successfully auto-patched MainActivity.java")
+              with open(java_file, "w", encoding="utf-8") as f:
+                  f.write(code)
+              print("Successfully auto-patched", java_file)
           PYEOF
 
           # 6. Clean themes.xml (Pure Black Status Bar & Navigation Bar)
@@ -646,7 +653,7 @@ jobs:
               // --- I. HELPER: CHECK IF ELEMENT IS INSIDE FOCUS SPRINT TIMER OR FOCUS MUSIC ---
               function isTimerOrMusicElement(el) {
                   const fontSize = parseFloat(window.getComputedStyle(el).fontSize || '12');
-                  if (fontSize >= 15) return true; // Big timer digits like 20:00, 15:00
+                  if (fontSize >= 15) return true;
                   let p = el;
                   let depth = 0;
                   while (p && p !== document.body && depth < 7) {
@@ -708,7 +715,6 @@ jobs:
                       if (el.children.length === 0 && el.innerText) {
                           const txt = el.innerText.trim();
                           if (isTimerOrMusicElement(el)) {
-                              // If Focus Sprint or Music accidentally got AM/PM, restore MM:SS
                               const ampmMatch = txt.match(/^(\d{2}):(\d{2})\s*(AM|PM)$/i);
                               if (ampmMatch) {
                                   let h = parseInt(ampmMatch[1], 10);
@@ -759,7 +765,6 @@ jobs:
                                       }
                                   }
                               } else {
-                                  // Create "Delete for Me" button right next to "Cancel" if missing
                                   btn.parentElement.style.display = 'flex';
                                   btn.parentElement.style.gap = '10px';
                                   const newDelBtn = document.createElement('button');
@@ -860,6 +865,7 @@ jobs:
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
           android.nonTransitiveRClass=true
+          android.suppressUnsupportedCompileSdk=36
           EOF
 
           cat << 'EOF' > settings.gradle.kts
@@ -901,7 +907,7 @@ jobs:
                   minSdk = 24
                   targetSdk = 36
                   versionCode = 3
-                  versionName = "1.0.1"
+                  versionName = "1.0.2"
               }
 
               signingConfigs {
@@ -934,7 +940,7 @@ jobs:
 
           dependencies {
               implementation("androidx.appcompat:appcompat:1.7.0")
-              implementation("com.google.android.material:1.12.0")
+              implementation("com.google.android.material:material:1.12.0")
               implementation("androidx.activity:activity:1.9.3")
               implementation("androidx.core:core:1.13.1")
               implementation("androidx.constraintlayout:constraintlayout:2.2.0")
@@ -943,7 +949,7 @@ jobs:
               implementation("androidx.core:core-splashscreen:1.0.1")
               implementation("com.google.android.gms:play-services-ads:23.6.0")
               implementation("com.google.android.gms:play-services-auth:21.2.0")
-              implementation("com.android.billingclient:billing:7.1.1")
+              implementation("com.android.billingclient:billing:8.0.0")
               implementation("com.google.code.gson:gson:2.11.0")
               implementation("androidx.browser:browser:1.8.0")
           }
