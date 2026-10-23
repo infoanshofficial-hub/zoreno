@@ -93,6 +93,16 @@ jobs:
                   '.enablePendingPurchases(com.android.billingclient.api.PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())',
                   code
               )
+              code = re.sub(
+                  r'\bproductDetailsList\.isEmpty\s*\(\s*\)',
+                  'productDetailsList.getProductDetailsList().isEmpty()',
+                  code
+              )
+              code = re.sub(
+                  r'\bproductDetailsList\.get\s*\(\s*0\s*\)',
+                  'productDetailsList.getProductDetailsList().get(0)',
+                  code
+              )
 
               if "class MainActivity" in code:
                   code = re.sub(r'SplashScreen\.installSplashScreen\s*\(\s*this\s*\)\s*;', '', code)
