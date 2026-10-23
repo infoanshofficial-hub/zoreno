@@ -852,15 +852,22 @@ jobs:
             fi
           done
 
-          # 11. Play Store ke liye Release Keystore generate karein
-          rm -f app/zoreno-release-key.jks
-          keytool -genkeypair -v \
-            -keystore app/zoreno-release-key.jks \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -alias zoreno \
-            -storepass Zoreno@2026 \
-            -keypass Zoreno@2026 \
-            -dname "CN=Zoreno, OU=Mobile, O=Toko Platforms Private Limited, L=Varanasi, S=UP, C=IN"
+                    # 11. GitHub repository se purani release keystore file ka upyog karein
+          if [ -f "zoreno-release-key.jks" ]; then
+            cp zoreno-release-key.jks app/zoreno-release-key.jks
+            echo "Using existing zoreno-release-key.jks from repository"
+          else
+            rm -f app/zoreno-release-key.jks
+            keytool -genkeypair -v \
+              -keystore app/zoreno-release-key.jks \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -alias zoreno \
+              -storepass Zoreno@2026 \
+              -keypass Zoreno@2026 \
+              -dname "CN=Zoreno, OU=Mobile, O=Toko Platforms Private Limited, L=Varanasi, S=UP, C=IN"
+            echo "Generated new release keystore"
+          fi
+          
 
           cat << 'EOF' > keystore-details.txt
           Keystore File: zoreno-release-key.jks
