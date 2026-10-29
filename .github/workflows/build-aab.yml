@@ -85,10 +85,10 @@ jobs:
           cp backup_rules.xml data_extraction_rules.xml network_security_config.xml file_paths.xml app/src/main/res/xml/ 2>/dev/null || true
           [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
 
-          # Official Play Store App Name set karein
+          # Official App Name "Zoreno" set karein
           cat << 'EOF' > app/src/main/res/values/strings.xml
           <resources>
-              <string name="app_name">Zoreno: AI Study, Chat &amp; Focus</string>
+              <string name="app_name">Zoreno</string>
           </resources>
           EOF
 
@@ -154,7 +154,7 @@ jobs:
             cp -f "$ICON_SRC" app/src/main/assets/splash.png
           fi
 
-          # 5. AUTOMATIC JAVA PATCH: Black Status Bar, Google Sign-In, Real Notification Bridge & Billing 8.0.0 Fix
+          # 5. AUTOMATIC JAVA PATCH: Black Status Bar, Google Sign-In, Voice/Mic Permission, Real Notification Bridge & Smart Billing (Play Store vs Other Stores)
           python3 - << 'PYEOF'
           import glob, re
 
@@ -183,6 +183,19 @@ jobs:
 
                   launcher_field = """
                   private androidx.activity.result.ActivityResultLauncher<android.content.Intent> zorenoGoogleLauncher;
+                  private boolean isInstalledFromPlayStore() {
+                      try {
+                          String installer;
+                          if (android.os.Build.VERSION.SDK_INT >= 30) {
+                              installer = getPackageManager().getInstallSourceInfo(getPackageName()).getInstallingPackageName();
+                          } else {
+                              installer = getPackageManager().getInstallerPackageName(getPackageName());
+                          }
+                          return "com.android.vending".equals(installer) || "com.google.android.feedback".equals(installer);
+                      } catch (Exception e) {
+                          return false;
+                      }
+                  }
                   """
                   if "zorenoGoogleLauncher" not in code:
                       code = re.sub(
@@ -204,7 +217,9 @@ jobs:
                       insetsCtrl.setAppearanceLightNavigationBars(false);
                   }
                   if (android.os.Build.VERSION.SDK_INT >= 33) {
-                      requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 101);
+                      requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS", "android.permission.RECORD_AUDIO"}, 101);
+                  } else if (android.os.Build.VERSION.SDK_INT >= 23) {
+                      requestPermissions(new String[]{"android.permission.RECORD_AUDIO"}, 101);
                   }
                   zorenoGoogleLauncher = registerForActivityResult(
                       new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
@@ -289,7 +304,18 @@ jobs:
                           count=1
                       )
 
+                  # Grant WebView Microphone/Audio permissions automatically inside WebChromeClient
+                  if "onPermissionRequest" not in code:
+                      if "new WebChromeClient()" in code:
+                          code = re.sub(
+                              r'new\s+WebChromeClient\s*\(\s*\)\s*\{',
+                              r'new WebChromeClient() {\n@Override public void onPermissionRequest(final android.webkit.PermissionRequest request) { runOnUiThread(() -> { try { request.grant(request.getResources()); } catch (Exception e) {} }); }\n',
+                              code,
+                              count=1
+                          )
+
                   js_bridge_code = """
+                  webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
                   webView.addJavascriptInterface(new Object() {
                       @android.webkit.JavascriptInterface
                       public void startGoogleLogin() {
@@ -312,6 +338,10 @@ jobs:
                               }
                           });
                       }
+                      @android.webkit.JavascriptInterface
+                      public boolean isPlayStoreBuild() {
+                          return isInstalledFromPlayStore();
+                      }
                   }, "ZorenoGoogleAuth");
                   webView.addJavascriptInterface(new Object() {
                       @android.webkit.JavascriptInterface
@@ -321,6 +351,7 @@ jobs:
                               String chId = "zoreno_dm_channel";
                               if (android.os.Build.VERSION.SDK_INT >= 26) {
                                   android.app.NotificationChannel ch = new android.app.NotificationChannel(chId, "Zoreno Messages", android.app.NotificationManager.IMPORTANCE_HIGH);
+                                  ch.enableVibration(true);
                                   nm.createNotificationChannel(ch);
                               }
                               android.content.Intent intent = new android.content.Intent(MainActivity.this, MainActivity.class);
@@ -334,13 +365,36 @@ jobs:
                                   .setContentTitle(title)
                                   .setContentText(msg)
                                   .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH)
+                                  .setDefaults(androidx.core.app.NotificationCompat.DEFAULT_ALL)
                                   .setContentIntent(pi)
                                   .setAutoCancel(true);
                               nm.notify((int) (System.currentTimeMillis() & 0xfffffff), b.build());
                           } catch (Exception e) {}
                       }
+                      @android.webkit.JavascriptInterface
+                      public void requestMicPermission() {
+                          runOnUiThread(() -> {
+                              if (android.os.Build.VERSION.SDK_INT >= 23) {
+                                  if (checkSelfPermission("android.permission.RECORD_AUDIO") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                      requestPermissions(new String[]{"android.permission.RECORD_AUDIO"}, 102);
+                                  }
+                              }
+                          });
+                      }
                   }, "AndroidNotif");
                   """
+                  if "onPermissionRequest" not in code:
+                      js_bridge_code = """
+                      webView.setWebChromeClient(new android.webkit.WebChromeClient() {
+                          @Override
+                          public void onPermissionRequest(final android.webkit.PermissionRequest request) {
+                              runOnUiThread(() -> {
+                                  try { request.grant(request.getResources()); } catch (Exception e) {}
+                              });
+                          }
+                      });
+                      """ + js_bridge_code
+
                   if "ZorenoGoogleAuth" not in code:
                       code = re.sub(
                           r'(setJavaScriptEnabled\s*\(\s*true\s*\)\s*;)',
@@ -349,9 +403,10 @@ jobs:
                           count=1
                       )
 
+                  # Smart Billing Routing: Play Store par sirf Google Play Billing, Indus/Samsung/Other par Razorpay Fallback
                   code = re.sub(
                       r'Toast\.makeText\s*\([^;]*?(?:Subscription product not found|Play Console)[^;]*?\)\s*\.show\s*\(\s*\)\s*;',
-                      r'runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript("if(typeof window.triggerRazorpayFallback===\'function\'){window.triggerRazorpayFallback();}", null); });',
+                      r'runOnUiThread(() -> { if (!isInstalledFromPlayStore()) { if (webView != null) webView.evaluateJavascript("if(typeof window.triggerRazorpayFallback===\'function\'){window.triggerRazorpayFallback();}", null); } else { android.widget.Toast.makeText(MainActivity.this, "Google Play Billing is initializing, please try again.", android.widget.Toast.LENGTH_SHORT).show(); } });',
                       code,
                       flags=re.DOTALL
                   )
@@ -382,7 +437,7 @@ jobs:
           cp app/src/main/res/values/themes.xml app/src/main/res/values-night/themes.xml
           cp app/src/main/res/values/themes.xml app/src/main/res/values-v31/themes.xml
 
-          # 7. AndroidManifest.xml me App Name, Icon, Notification Permission, adjustResize aur Theme fix karein
+          # 7. AndroidManifest.xml me App Name, Icon, Notification, Mic Permission, Billing, adjustResize aur Theme fix karein
           if [ -f "AndroidManifest.xml" ]; then
             cp AndroidManifest.xml app/src/main/AndroidManifest.xml
             sed -i 's/package="[^"]*"//g' app/src/main/AndroidManifest.xml
@@ -392,6 +447,12 @@ jobs:
             sed -i 's/android:roundIcon="[^"]*"/android:roundIcon="@mipmap\/ic_launcher_round"/g' app/src/main/AndroidManifest.xml
             if ! grep -q "POST_NOTIFICATIONS" app/src/main/AndroidManifest.xml; then
               sed -i 's/<application/<uses-permission android:name="android.permission.POST_NOTIFICATIONS" \/>\n    <application/g' app/src/main/AndroidManifest.xml
+            fi
+            if ! grep -q "RECORD_AUDIO" app/src/main/AndroidManifest.xml; then
+              sed -i 's/<application/<uses-permission android:name="android.permission.RECORD_AUDIO" \/>\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" \/>\n    <application/g' app/src/main/AndroidManifest.xml
+            fi
+            if ! grep -q "com.android.vending.BILLING" app/src/main/AndroidManifest.xml; then
+              sed -i 's/<application/<uses-permission android:name="com.android.vending.BILLING" \/>\n    <application/g' app/src/main/AndroidManifest.xml
             fi
             if ! grep -q "windowSoftInputMode" app/src/main/AndroidManifest.xml; then
               sed -i 's/<activity /<activity android:windowSoftInputMode="adjustResize" /g' app/src/main/AndroidManifest.xml
@@ -411,7 +472,9 @@ jobs:
               overflow-x: hidden !important;
               box-sizing: border-box !important;
           }
-          .chat-screen, .ai-chat-screen, #chat-container {
+          .chat-screen:not(.hidden):not([hidden]):not([style*="display: none"]):not([style*="display:none"]),
+          .ai-chat-screen:not(.hidden):not([hidden]):not([style*="display: none"]):not([style*="display:none"]),
+          #chat-container:not(.hidden):not([hidden]):not([style*="display: none"]):not([style*="display:none"]) {
               display: flex !important;
               flex-direction: column !important;
               height: 100dvh !important;
@@ -450,6 +513,7 @@ jobs:
               background-size: cover;
               z-index: 999999;
               transition: opacity 0.35s ease;
+              pointer-events: none;
           }
           .zoreno-google-btn-wrap {
               width: 100%;
@@ -496,7 +560,7 @@ jobs:
           }
           EOF
 
-          # 9. Lightweight Zoreno JS Fixes (Splash + Keyboard + Native Google Sign-In Button)
+          # 9. Lightweight Zoreno JS Fixes (Splash + Keyboard + Native Google Sign-In + Store-Aware Billing + Mic & Notification Support)
           cat << 'EOF' > app/src/main/assets/zoreno-fixes.js
           (function() {
               let splash = document.getElementById('zoreno-custom-splash');
@@ -524,6 +588,42 @@ jobs:
                       }
                   });
               }
+
+              // Store-Aware Billing Protection: Block Razorpay ONLY if installed from Google Play Store
+              window.addEventListener('DOMContentLoaded', () => {
+                  try {
+                      if (window.ZorenoGoogleAuth && typeof window.ZorenoGoogleAuth.isPlayStoreBuild === 'function') {
+                          if (window.ZorenoGoogleAuth.isPlayStoreBuild()) {
+                              window.triggerRazorpayFallback = function() {
+                                  console.log("Play Store install detected: Using Google Play Billing strictly.");
+                              };
+                          }
+                      }
+                  } catch (e) {}
+              });
+
+              // Bridge Web Notifications to Native Android Notification Bar
+              if (window.AndroidNotif && typeof window.AndroidNotif.showNotification === 'function') {
+                  window.Notification = function(title, options) {
+                      const body = (options && options.body) ? options.body : '';
+                      window.AndroidNotif.showNotification(String(title || 'Zoreno'), String(body));
+                  };
+                  window.Notification.permission = 'granted';
+                  window.Notification.requestPermission = async () => 'granted';
+              }
+
+              // Request Native Mic Permission when user taps voice/mic button
+              document.addEventListener('click', (e) => {
+                  const el = e.target ? e.target.closest('button, [role="button"], .icon-btn, [onclick]') : null;
+                  if (!el) return;
+                  const id = (el.id || '').toLowerCase();
+                  const cls = (el.className || '').toString().toLowerCase();
+                  if (id.includes('mic') || id.includes('voice') || cls.includes('mic') || cls.includes('voice')) {
+                      if (window.AndroidNotif && typeof window.AndroidNotif.requestMicPermission === 'function') {
+                          window.AndroidNotif.requestMicPermission();
+                      }
+                  }
+              }, true);
 
               window.onZorenoNativeGoogleLogin = async function(email, displayName, idToken) {
                   if (!email) return;
@@ -602,7 +702,7 @@ jobs:
               -alias zoreno \
               -storepass Zoreno@2026 \
               -keypass Zoreno@2026 \
-              -dname "CN=Zoreno, OU=Mobile, O=Toko Platforms Private Limited, L=Varanasi, S=UP, C=IN"
+              -dname "CN=Zoreno, OU=Mobile, O=Toko Platforms, L=Varanasi, S=UP, C=IN"
             echo "Generated new release keystore"
           fi
 
@@ -613,7 +713,7 @@ jobs:
           Key Password: Zoreno@2026
           EOF
 
-          # 12. Clean gradle.properties, settings.gradle.kts & build.gradle.kts
+          # 12. Clean gradle.properties, settings.gradle.kts & build.gradle.kts (Version Code 6, Version Name 1.0.5)
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
@@ -659,8 +759,8 @@ jobs:
                   applicationId = "$APP_ID"
                   minSdk = 24
                   targetSdk = 36
-                  versionCode = 5
-                  versionName = "1.0.4"
+                  versionCode = 6
+                  versionName = "1.0.5"
               }
 
               signingConfigs {
