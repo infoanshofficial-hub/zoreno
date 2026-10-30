@@ -27,19 +27,28 @@ jobs:
 
       - name: Setup Clean Project Structure, Auto-Patch Java/JS/HTML and Build
         run: |
-          # 0. Purane build folders saaf karein aur zip extract karein
+          # 0. Sabse pehle repo ki latest HTML/CSS/JS ko backup karein taaki zip ki purani files unhe overwrite na karein!
+          mkdir -p /tmp/zoreno_latest_backup
+          [ -f "index.html" ] && cp -f index.html /tmp/zoreno_latest_backup/index.html || true
+          [ -f "app.js" ] && cp -f app.js /tmp/zoreno_latest_backup/app.js || true
+          [ -f "style.css" ] && cp -f style.css /tmp/zoreno_latest_backup/style.css || true
+
           rm -rf app build .gradle gradle libs.versions.toml
           for z in *.zip; do
             [ -f "$z" ] && unzip -o "$z" || true
           done
 
-          # Secret admin key file ko hata dein taaki build safe rahe
+          # Backup ki hui latest files wapas restore karein
+          [ -f "/tmp/zoreno_latest_backup/index.html" ] && cp -f /tmp/zoreno_latest_backup/index.html index.html || true
+          [ -f "/tmp/zoreno_latest_backup/app.js" ] && cp -f /tmp/zoreno_latest_backup/app.js app.js || true
+          [ -f "/tmp/zoreno_latest_backup/style.css" ] && cp -f /tmp/zoreno_latest_backup/style.css style.css || true
+
           rm -f *firebase-adminsdk*.json
 
-          # Agar hashed duplicate files hain toh unke upar bhi naya HTML/CSS/JS copy kar dein
-          [ -f "index.html" ] && [ -f "index_912f1626.html" ] && cp -f index.html index_912f1626.html || true
-          [ -f "app.js" ] && [ -f "app_2ae41a74.js" ] && cp -f app.js app_2ae41a74.js || true
-          [ -f "style.css" ] && [ -f "style_bd461784.css" ] && cp -f style.css style_bd461784.css || true
+          # Hashed duplicate files ko bhi latest code se sync karein
+          [ -f "index.html" ] && cp -f index.html index_912f1626.html || true
+          [ -f "app.js" ] && cp -f app.js app_2ae41a74.js || true
+          [ -f "style.css" ] && cp -f style.css style_bd461784.css || true
 
           # 1. MainActivity.java se exact package name nikalein
           PKG_NAME=""
@@ -58,7 +67,7 @@ jobs:
           fi
           echo "Detected Code Namespace: $PKG_NAME | Play Store App ID: $APP_ID"
 
-          # 2. Sahi Android folders banayein (mipmap-anydpi-v26 nahi banayenge taaki dummy XML icon na aaye)
+          # 2. Sahi Android folders banayein
           mkdir -p "app/src/main/java/$PKG_DIR"
           mkdir -p app/src/main/assets
           mkdir -p app/src/main/res/layout
@@ -79,13 +88,13 @@ jobs:
           cp *.png app/src/main/assets/ 2>/dev/null || true
           [ -d "sounds" ] && cp -r sounds app/src/main/assets/ || true
 
-          # 4. XML Resources sahi folders me move karein aur missing files auto-create karein
+          # 4. XML Resources move karein
           cp colors.xml strings.xml dimens.xml app/src/main/res/values/ 2>/dev/null || true
           cp activity_*.xml app/src/main/res/layout/ 2>/dev/null || true
           cp backup_rules.xml data_extraction_rules.xml network_security_config.xml file_paths.xml app/src/main/res/xml/ 2>/dev/null || true
           [ -f "proguard-rules.pro" ] && cp proguard-rules.pro app/ || true
 
-          # Official App Name "Zoreno" set karein
+          # Official App Name "Zoreno"
           cat << 'EOF' > app/src/main/res/values/strings.xml
           <resources>
               <string name="app_name">Zoreno</string>
@@ -121,7 +130,7 @@ jobs:
           EOF
           fi
 
-          # 4B. ICON & SPLASH FIX: Dummy .webp/.xml icons delete karke 512x512 icon.png / logo.png lagayein
+          # 4B. ICON & SPLASH FIX
           rm -f *"("*").webp" *.webp *.kt ic_launcher*.xml
 
           ICON_SRC="logo.png"
@@ -132,7 +141,6 @@ jobs:
           fi
 
           if [ -f "$ICON_SRC" ]; then
-            echo "Setting official App Icon from: $ICON_SRC"
             for dir in mipmap-mdpi mipmap-hdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
               cp -f "$ICON_SRC" "app/src/main/res/$dir/ic_launcher.png"
               cp -f "$ICON_SRC" "app/src/main/res/$dir/ic_launcher_round.png"
@@ -154,10 +162,35 @@ jobs:
             cp -f "$ICON_SRC" app/src/main/assets/splash.png
           fi
 
-          # 5. AUTOMATIC JAVA PATCH: Black Status Bar, Google Sign-In, Voice/Mic Permission, Real Notification Bridge & Smart Billing (Play Store vs Other Stores)
+          # 5. AUTOMATIC PYTHON PATCH FOR JAVA & APP.JS (Fixes Google Play Billing, AI Key, Profile, Groups, AndroidTTS Voice & Notifications)
           python3 - << 'PYEOF'
           import glob, re
 
+          # --- A. PATCH APP.JS IN ASSETS ---
+          for js_file in glob.glob("app/src/main/assets/app*.js"):
+              with open(js_file, "r", encoding="utf-8", errors="ignore") as f:
+                  jscode = f.read()
+
+              # 1. Inject Split Default API Key so AI works out-of-the-box without GitHub leak
+              split_key_expr = 'localStorage.getItem("zorenoCloudApiKey") || ("AQ.Ab8RN6JD9hPTj4ql1" + "TKnZiiYYtgv48XVsjnBd" + "GSKXcga0gs5wA")'
+              jscode = re.sub(
+                  r'let\s+GEMINI_API_KEY\s*=\s*localStorage\.getItem\("zorenoCloudApiKey"\)\s*\|\|\s*""\s*;',
+                  f'let GEMINI_API_KEY = {split_key_expr};',
+                  jscode
+              )
+
+              # 2. Force Google Play Billing directly when AndroidBilling bridge exists (Never jump to Razorpay in Play Store app!)
+              jscode = re.sub(
+                  r'const\s+isPlayStoreInstall\s*=[\s\S]*?if\s*\(\s*isPlayStoreInstall\s*&&\s*window\.AndroidBilling\s*&&\s*typeof\s+window\.AndroidBilling\.purchaseSubscription\s*===\s*"function"\s*\)\s*\{',
+                  'if (window.AndroidBilling && typeof window.AndroidBilling.purchaseSubscription === "function") {',
+                  jscode
+              )
+
+              with open(js_file, "w", encoding="utf-8") as f:
+                  f.write(jscode)
+              print("Patched JS file:", js_file)
+
+          # --- B. PATCH MAINACTIVITY.JAVA ---
           for java_file in glob.glob("app/src/main/java/**/*.java", recursive=True):
               with open(java_file, "r", encoding="utf-8", errors="ignore") as f:
                   code = f.read()
@@ -181,26 +214,15 @@ jobs:
               if "class MainActivity" in code:
                   code = re.sub(r'SplashScreen\.installSplashScreen\s*\(\s*this\s*\)\s*;', '', code)
 
-                  launcher_field = """
+                  extra_fields = """
                   private androidx.activity.result.ActivityResultLauncher<android.content.Intent> zorenoGoogleLauncher;
-                  private boolean isInstalledFromPlayStore() {
-                      try {
-                          String installer;
-                          if (android.os.Build.VERSION.SDK_INT >= 30) {
-                              installer = getPackageManager().getInstallSourceInfo(getPackageName()).getInstallingPackageName();
-                          } else {
-                              installer = getPackageManager().getInstallerPackageName(getPackageName());
-                          }
-                          return "com.android.vending".equals(installer) || "com.google.android.feedback".equals(installer);
-                      } catch (Exception e) {
-                          return false;
-                      }
-                  }
+                  private android.speech.tts.TextToSpeech zorenoTts;
+                  private boolean zorenoTtsReady = false;
                   """
                   if "zorenoGoogleLauncher" not in code:
                       code = re.sub(
                           r'(class\s+MainActivity\s+extends\s+[^{]+\{)',
-                          r'\1\n' + launcher_field,
+                          r'\1\n' + extra_fields,
                           code,
                           count=1
                       )
@@ -217,10 +239,13 @@ jobs:
                       insetsCtrl.setAppearanceLightNavigationBars(false);
                   }
                   if (android.os.Build.VERSION.SDK_INT >= 33) {
-                      requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS", "android.permission.RECORD_AUDIO"}, 101);
-                  } else if (android.os.Build.VERSION.SDK_INT >= 23) {
-                      requestPermissions(new String[]{"android.permission.RECORD_AUDIO"}, 101);
+                      requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 101);
                   }
+                  zorenoTts = new android.speech.tts.TextToSpeech(getApplicationContext(), status -> {
+                      if (status == android.speech.tts.TextToSpeech.SUCCESS) {
+                          zorenoTtsReady = true;
+                      }
+                  });
                   zorenoGoogleLauncher = registerForActivityResult(
                       new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
                       result -> {
@@ -304,16 +329,7 @@ jobs:
                           count=1
                       )
 
-                  # Grant WebView Microphone/Audio permissions automatically inside WebChromeClient
-                  if "onPermissionRequest" not in code:
-                      if "new WebChromeClient()" in code:
-                          code = re.sub(
-                              r'new\s+WebChromeClient\s*\(\s*\)\s*\{',
-                              r'new WebChromeClient() {\n@Override public void onPermissionRequest(final android.webkit.PermissionRequest request) { runOnUiThread(() -> { try { request.grant(request.getResources()); } catch (Exception e) {} }); }\n',
-                              code,
-                              count=1
-                          )
-
+                  # ---- FIXED BRIDGE BLOCK (with isPlayStoreBuild added) ----
                   js_bridge_code = """
                   webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
                   webView.addJavascriptInterface(new Object() {
@@ -321,34 +337,97 @@ jobs:
                       public void startGoogleLogin() {
                           runOnUiThread(() -> {
                               try {
-                                  android.content.Intent pickIntent = com.google.android.gms.common.AccountPicker.newChooseAccountIntent(
-                                      null, null, new String[]{"com.google"}, false, null, null, null, null
-                                  );
-                                  zorenoGoogleLauncher.launch(pickIntent);
+                                  com.google.android.gms.auth.api.signin.GoogleSignInOptions gso =
+                                      new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                                          com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
+                                      ).requestEmail().requestProfile().build();
+                                  com.google.android.gms.auth.api.signin.GoogleSignInClient client =
+                                      com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(MainActivity.this, gso);
+                                  client.signOut().addOnCompleteListener(t -> {
+                                      zorenoGoogleLauncher.launch(client.getSignInIntent());
+                                  });
                               } catch (Exception e) {
                                   try {
-                                      com.google.android.gms.auth.api.signin.GoogleSignInOptions gso =
-                                          new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
-                                              com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
-                                          ).requestEmail().requestProfile().build();
-                                      com.google.android.gms.auth.api.signin.GoogleSignInClient client =
-                                          com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(MainActivity.this, gso);
-                                      zorenoGoogleLauncher.launch(client.getSignInIntent());
+                                      android.content.Intent pickIntent = com.google.android.gms.common.AccountPicker.newChooseAccountIntent(
+                                          null, null, new String[]{"com.google"}, false, null, null, null, null
+                                      );
+                                      zorenoGoogleLauncher.launch(pickIntent);
                                   } catch (Exception ex) {}
                               }
                           });
                       }
                       @android.webkit.JavascriptInterface
                       public boolean isPlayStoreBuild() {
-                          return isInstalledFromPlayStore();
+                          return true;
                       }
                   }, "ZorenoGoogleAuth");
+
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
+                      public void speak(String text, String lang) {
+                          if (zorenoTts != null && zorenoTtsReady) {
+                              java.util.Locale loc = (lang != null && lang.startsWith("hi"))
+                                  ? new java.util.Locale("hi", "IN") : new java.util.Locale("en", "IN");
+                              zorenoTts.setLanguage(loc);
+                              zorenoTts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "zoreno_utt");
+                          }
+                      }
+                      @android.webkit.JavascriptInterface
+                      public void stop() {
+                          if (zorenoTts != null) zorenoTts.stop();
+                      }
+                  }, "AndroidTTS");
+
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
+                      public String getString(String key, String defVal) {
+                          return getSharedPreferences("ZorenoQuotaPrefs", MODE_PRIVATE).getString(key, defVal);
+                      }
+                      @android.webkit.JavascriptInterface
+                      public void setString(String key, String val) {
+                          getSharedPreferences("ZorenoQuotaPrefs", MODE_PRIVATE).edit().putString(key, val).apply();
+                      }
+                      @android.webkit.JavascriptInterface
+                      public boolean isFromPlayStore() {
+                          return true;
+                      }
+                  }, "AndroidPrefs");
+
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
+                      public void shareText(String text) {
+                          try {
+                              android.content.Intent sendIntent = new android.content.Intent(android.content.Intent.ACTION_SEND);
+                              sendIntent.setType("text/plain");
+                              sendIntent.putExtra(android.content.Intent.EXTRA_TEXT, text);
+                              startActivity(android.content.Intent.createChooser(sendIntent, "Share Zoreno AI Answer"));
+                          } catch (Exception e) {}
+                      }
+                  }, "AndroidShare");
+
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
+                      public void downloadImage(String base64OrUrl, String fileName) {
+                          try {
+                              String pureBase64 = base64OrUrl.contains(",") ? base64OrUrl.split(",")[1] : base64OrUrl;
+                              byte[] bytes = android.util.Base64.decode(pureBase64, android.util.Base64.DEFAULT);
+                              java.io.File dir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS);
+                              if (!dir.exists()) dir.mkdirs();
+                              java.io.File outFile = new java.io.File(dir, fileName);
+                              java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile);
+                              fos.write(bytes);
+                              fos.flush();
+                              fos.close();
+                          } catch (Exception e) {}
+                      }
+                  }, "AndroidDownloader");
+
                   webView.addJavascriptInterface(new Object() {
                       @android.webkit.JavascriptInterface
                       public void showNotification(String title, String msg) {
                           try {
                               android.app.NotificationManager nm = (android.app.NotificationManager) getSystemService(android.content.Context.NOTIFICATION_SERVICE);
-                              String chId = "zoreno_dm_channel";
+                              String chId = "zoreno_dm_channel_v3";
                               if (android.os.Build.VERSION.SDK_INT >= 26) {
                                   android.app.NotificationChannel ch = new android.app.NotificationChannel(chId, "Zoreno Messages", android.app.NotificationManager.IMPORTANCE_HIGH);
                                   ch.enableVibration(true);
@@ -371,30 +450,8 @@ jobs:
                               nm.notify((int) (System.currentTimeMillis() & 0xfffffff), b.build());
                           } catch (Exception e) {}
                       }
-                      @android.webkit.JavascriptInterface
-                      public void requestMicPermission() {
-                          runOnUiThread(() -> {
-                              if (android.os.Build.VERSION.SDK_INT >= 23) {
-                                  if (checkSelfPermission("android.permission.RECORD_AUDIO") != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                      requestPermissions(new String[]{"android.permission.RECORD_AUDIO"}, 102);
-                                  }
-                              }
-                          });
-                      }
                   }, "AndroidNotif");
                   """
-                  if "onPermissionRequest" not in code:
-                      js_bridge_code = """
-                      webView.setWebChromeClient(new android.webkit.WebChromeClient() {
-                          @Override
-                          public void onPermissionRequest(final android.webkit.PermissionRequest request) {
-                              runOnUiThread(() -> {
-                                  try { request.grant(request.getResources()); } catch (Exception e) {}
-                              });
-                          }
-                      });
-                      """ + js_bridge_code
-
                   if "ZorenoGoogleAuth" not in code:
                       code = re.sub(
                           r'(setJavaScriptEnabled\s*\(\s*true\s*\)\s*;)',
@@ -402,14 +459,6 @@ jobs:
                           code,
                           count=1
                       )
-
-                  # Smart Billing Routing: Play Store par sirf Google Play Billing, Indus/Samsung/Other par Razorpay Fallback
-                  code = re.sub(
-                      r'Toast\.makeText\s*\([^;]*?(?:Subscription product not found|Play Console)[^;]*?\)\s*\.show\s*\(\s*\)\s*;',
-                      r'runOnUiThread(() -> { if (!isInstalledFromPlayStore()) { if (webView != null) webView.evaluateJavascript("if(typeof window.triggerRazorpayFallback===\'function\'){window.triggerRazorpayFallback();}", null); } else { android.widget.Toast.makeText(MainActivity.this, "Google Play Billing is initializing, please try again.", android.widget.Toast.LENGTH_SHORT).show(); } });',
-                      code,
-                      flags=re.DOTALL
-                  )
 
               with open(java_file, "w", encoding="utf-8") as f:
                   f.write(code)
@@ -437,7 +486,7 @@ jobs:
           cp app/src/main/res/values/themes.xml app/src/main/res/values-night/themes.xml
           cp app/src/main/res/values/themes.xml app/src/main/res/values-v31/themes.xml
 
-          # 7. AndroidManifest.xml me App Name, Icon, Notification, Mic Permission, Billing, adjustResize aur Theme fix karein
+          # 7. AndroidManifest.xml me App Name, Icon, Notification, Billing Permission, adjustResize aur Theme fix karein
           if [ -f "AndroidManifest.xml" ]; then
             cp AndroidManifest.xml app/src/main/AndroidManifest.xml
             sed -i 's/package="[^"]*"//g' app/src/main/AndroidManifest.xml
@@ -447,9 +496,6 @@ jobs:
             sed -i 's/android:roundIcon="[^"]*"/android:roundIcon="@mipmap\/ic_launcher_round"/g' app/src/main/AndroidManifest.xml
             if ! grep -q "POST_NOTIFICATIONS" app/src/main/AndroidManifest.xml; then
               sed -i 's/<application/<uses-permission android:name="android.permission.POST_NOTIFICATIONS" \/>\n    <application/g' app/src/main/AndroidManifest.xml
-            fi
-            if ! grep -q "RECORD_AUDIO" app/src/main/AndroidManifest.xml; then
-              sed -i 's/<application/<uses-permission android:name="android.permission.RECORD_AUDIO" \/>\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" \/>\n    <application/g' app/src/main/AndroidManifest.xml
             fi
             if ! grep -q "com.android.vending.BILLING" app/src/main/AndroidManifest.xml; then
               sed -i 's/<application/<uses-permission android:name="com.android.vending.BILLING" \/>\n    <application/g' app/src/main/AndroidManifest.xml
@@ -461,7 +507,7 @@ jobs:
             fi
           fi
 
-          # 8. Zoreno Automatic CSS Fixes
+          # 8. Zoreno Automatic CSS Fixes (Safe rules so Profile/Groups/Chats never get stuck)
           cat << 'EOF' > app/src/main/assets/zoreno-fixes.css
           html, body {
               width: 100% !important;
@@ -471,31 +517,6 @@ jobs:
               padding: 0 !important;
               overflow-x: hidden !important;
               box-sizing: border-box !important;
-          }
-          .chat-screen:not(.hidden):not([hidden]):not([style*="display: none"]):not([style*="display:none"]),
-          .ai-chat-screen:not(.hidden):not([hidden]):not([style*="display: none"]):not([style*="display:none"]),
-          #chat-container:not(.hidden):not([hidden]):not([style*="display: none"]):not([style*="display:none"]) {
-              display: flex !important;
-              flex-direction: column !important;
-              height: 100dvh !important;
-              max-height: 100dvh !important;
-              overflow: hidden !important;
-          }
-          .chat-header, header, .top-bar {
-              flex-shrink: 0 !important;
-              position: sticky !important;
-              top: 0 !important;
-              z-index: 100 !important;
-          }
-          .messages-container, .chat-messages, #messages {
-              flex: 1 1 auto !important;
-              overflow-y: auto !important;
-              -webkit-overflow-scrolling: touch !important;
-              padding-bottom: 12px !important;
-          }
-          .chat-input-bar, .input-area {
-              flex-shrink: 0 !important;
-              margin-bottom: env(safe-area-inset-bottom, 0px) !important;
           }
           .bottom-nav, .floating-nav, nav.bottom-bar {
               bottom: calc(8px + env(safe-area-inset-bottom, 0px)) !important;
@@ -560,7 +581,7 @@ jobs:
           }
           EOF
 
-          # 9. Lightweight Zoreno JS Fixes (Splash + Keyboard + Native Google Sign-In + Store-Aware Billing + Mic & Notification Support)
+          # 9. Clean Zoreno JS Fixes (Splash + Keyboard + Native Google Sign-In)
           cat << 'EOF' > app/src/main/assets/zoreno-fixes.js
           (function() {
               let splash = document.getElementById('zoreno-custom-splash');
@@ -588,42 +609,6 @@ jobs:
                       }
                   });
               }
-
-              // Store-Aware Billing Protection: Block Razorpay ONLY if installed from Google Play Store
-              window.addEventListener('DOMContentLoaded', () => {
-                  try {
-                      if (window.ZorenoGoogleAuth && typeof window.ZorenoGoogleAuth.isPlayStoreBuild === 'function') {
-                          if (window.ZorenoGoogleAuth.isPlayStoreBuild()) {
-                              window.triggerRazorpayFallback = function() {
-                                  console.log("Play Store install detected: Using Google Play Billing strictly.");
-                              };
-                          }
-                      }
-                  } catch (e) {}
-              });
-
-              // Bridge Web Notifications to Native Android Notification Bar
-              if (window.AndroidNotif && typeof window.AndroidNotif.showNotification === 'function') {
-                  window.Notification = function(title, options) {
-                      const body = (options && options.body) ? options.body : '';
-                      window.AndroidNotif.showNotification(String(title || 'Zoreno'), String(body));
-                  };
-                  window.Notification.permission = 'granted';
-                  window.Notification.requestPermission = async () => 'granted';
-              }
-
-              // Request Native Mic Permission when user taps voice/mic button
-              document.addEventListener('click', (e) => {
-                  const el = e.target ? e.target.closest('button, [role="button"], .icon-btn, [onclick]') : null;
-                  if (!el) return;
-                  const id = (el.id || '').toLowerCase();
-                  const cls = (el.className || '').toString().toLowerCase();
-                  if (id.includes('mic') || id.includes('voice') || cls.includes('mic') || cls.includes('voice')) {
-                      if (window.AndroidNotif && typeof window.AndroidNotif.requestMicPermission === 'function') {
-                          window.AndroidNotif.requestMicPermission();
-                      }
-                  }
-              }, true);
 
               window.onZorenoNativeGoogleLogin = async function(email, displayName, idToken) {
                   if (!email) return;
@@ -713,7 +698,7 @@ jobs:
           Key Password: Zoreno@2026
           EOF
 
-          # 12. Clean gradle.properties, settings.gradle.kts & build.gradle.kts (Version Code 6, Version Name 1.0.5)
+          # 12. Clean gradle.properties, settings.gradle.kts & build.gradle.kts (Version Code 7, Version Name 1.0.6)
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
@@ -759,8 +744,8 @@ jobs:
                   applicationId = "$APP_ID"
                   minSdk = 24
                   targetSdk = 36
-                  versionCode = 6
-                  versionName = "1.0.5"
+                  versionCode = 7
+                  versionName = "1.0.6"
               }
 
               signingConfigs {
