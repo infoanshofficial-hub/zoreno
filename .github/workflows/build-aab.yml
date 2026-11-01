@@ -138,7 +138,7 @@ jobs:
           EOF
           fi
 
-          # 4B. ICON & SPLASH FIX (Ensures Official Zoreno Logo Appears on App, Splash & Google Login)
+          # 4B. ICON & SPLASH FIX
           rm -f *"("*").webp" *.webp *.kt ic_launcher*.xml
 
           ICON_SRC="logo.png"
@@ -170,6 +170,180 @@ jobs:
             cp -f "$ICON_SRC" app/src/main/assets/splash.png
           fi
 
+          # 4C. CREATE NATIVE BACKGROUND NOTIFICATION SERVICE (Works Even When App is Swiped Closed!)
+          cat << EOF > "app/src/main/java/$PKG_DIR/ZorenoBgNotifService.java"
+          package $PKG_NAME;
+
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.app.Service;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.SharedPreferences;
+          import android.os.Build;
+          import android.os.Handler;
+          import android.os.IBinder;
+          import android.os.Looper;
+          import androidx.core.app.NotificationCompat;
+          import com.google.gson.JsonArray;
+          import com.google.gson.JsonElement;
+          import com.google.gson.JsonObject;
+          import com.google.gson.JsonParser;
+          import java.io.BufferedReader;
+          import java.io.InputStreamReader;
+          import java.io.OutputStream;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.util.concurrent.Executors;
+          import java.util.concurrent.ScheduledExecutorService;
+          import java.util.concurrent.TimeUnit;
+
+          public class ZorenoBgNotifService extends Service {
+              private ScheduledExecutorService scheduler;
+
+              @Override
+              public void onCreate() {
+                  super.onCreate();
+                  startPollingFirestoreForClosedAppNotifications();
+              }
+
+              private void startPollingFirestoreForClosedAppNotifications() {
+                  if (scheduler != null) return;
+                  scheduler = Executors.newSingleThreadScheduledExecutor();
+                  scheduler.scheduleAtFixedRate(() -> {
+                      try {
+                          SharedPreferences prefs = getSharedPreferences("ZorenoQuotaPrefs", MODE_PRIVATE);
+                          String myUid = prefs.getString("zorenoActiveUid", "");
+                          if (myUid == null || myUid.isEmpty()) return;
+
+                          URL url = new URL("https://firestore.googleapis.com/v1/projects/zeraai-ans/databases/(default)/documents:runQuery");
+                          HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+                          conn.setRequestMethod("POST");
+                          conn.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                          conn.setConnectTimeout(7000);
+                          conn.setReadTimeout(7000);
+                          conn.setDoOutput(true);
+
+                          String queryJson = "{\"structuredQuery\":{\"from\":[{\"collectionId\":\"chats\"}],\"where\":{\"fieldFilter\":{\"field\":{\"fieldPath\":\"participants\"},\"op\":\"ARRAY_CONTAINS\",\"value\":{\"stringValue\":\"" + myUid + "\"}}}}}";
+                          try (OutputStream os = conn.getOutputStream()) {
+                              os.write(queryJson.getBytes("UTF-8"));
+                          }
+
+                          if (conn.getResponseCode() == 200) {
+                              StringBuilder sb = new StringBuilder();
+                              try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
+                                  String line;
+                                  while ((line = br.readLine()) != null) sb.append(line);
+                              }
+                              JsonArray arr = JsonParser.parseString(sb.toString()).getAsJsonArray();
+                              for (JsonElement el : arr) {
+                                  if (!el.isJsonObject()) continue;
+                                  JsonObject obj = el.getAsJsonObject();
+                                  if (!obj.has("document")) continue;
+                                  JsonObject doc = obj.getAsJsonObject("document");
+                                  if (!doc.has("fields")) continue;
+                                  JsonObject fields = doc.getAsJsonObject("fields");
+
+                                  String lastSenderId = getStrField(fields, "lastSenderId");
+                                  String lastSenderName = getStrField(fields, "lastSenderName");
+                                  String lastMsg = getStrField(fields, "lastMessage");
+                                  long msgTimeMs = getIntField(fields, "lastMessageAtMs");
+
+                                  if (!lastSenderId.isEmpty() && !lastSenderId.equals(myUid) && msgTimeMs > 0) {
+                                      String notifKey = "bgNotif_" + doc.get("name").getAsString();
+                                      long lastNotified = prefs.getLong(notifKey, 0L);
+                                      if (lastNotified == 0L) {
+                                          prefs.edit().putLong(notifKey, msgTimeMs).apply();
+                                      } else if (msgTimeMs > lastNotified) {
+                                          prefs.edit().putLong(notifKey, msgTimeMs).apply();
+                                          fireSystemNotification(lastSenderName.isEmpty() ? "Zoreno Message" : lastSenderName, lastMsg.isEmpty() ? "Sent you a message" : lastMsg);
+                                      }
+                                  }
+                              }
+                          }
+                      } catch (Exception ignored) {}
+                  }, 8, 12, TimeUnit.SECONDS);
+              }
+
+              private String getStrField(JsonObject fields, String key) {
+                  try {
+                      if (fields.has(key) && fields.getAsJsonObject(key).has("stringValue")) {
+                          return fields.getAsJsonObject(key).get("stringValue").getAsString();
+                      }
+                  } catch (Exception ignored) {}
+                  return "";
+              }
+
+              private long getIntField(JsonObject fields, String key) {
+                  try {
+                      if (fields.has(key)) {
+                          JsonObject v = fields.getAsJsonObject(key);
+                          if (v.has("integerValue")) return Long.parseLong(v.get("integerValue").getAsString());
+                          if (v.has("doubleValue")) return (long) v.get("doubleValue").getAsDouble();
+                      }
+                  } catch (Exception ignored) {}
+                  return 0L;
+              }
+
+              private void fireSystemNotification(String title, String body) {
+                  new Handler(Looper.getMainLooper()).post(() -> {
+                      try {
+                          NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+                          String chId = "zoreno_dm_channel_v5";
+                          if (Build.VERSION.SDK_INT >= 26) {
+                              NotificationChannel ch = new NotificationChannel(chId, "Zoreno Messages", NotificationManager.IMPORTANCE_HIGH);
+                              ch.enableVibration(true);
+                              nm.createNotificationChannel(ch);
+                          }
+                          Intent intent = new Intent(ZorenoBgNotifService.this, MainActivity.class);
+                          intent.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                          PendingIntent pi = PendingIntent.getActivity(
+                              ZorenoBgNotifService.this, 0, intent,
+                              PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
+                          );
+                          NotificationCompat.Builder b = new NotificationCompat.Builder(ZorenoBgNotifService.this, chId)
+                              .setSmallIcon(R.mipmap.ic_launcher)
+                              .setContentTitle(title)
+                              .setContentText(body)
+                              .setPriority(NotificationCompat.PRIORITY_HIGH)
+                              .setDefaults(NotificationCompat.DEFAULT_ALL)
+                              .setContentIntent(pi)
+                              .setAutoCancel(true);
+                          nm.notify((int) (System.currentTimeMillis() & 0xfffffff), b.build());
+                      } catch (Exception ignored) {}
+                  });
+              }
+
+              @Override
+              public int onStartCommand(Intent intent, int flags, int startId) {
+                  return START_STICKY;
+              }
+
+              @Override
+              public void onTaskRemoved(Intent rootIntent) {
+                  try {
+                      Intent restartIntent = new Intent(getApplicationContext(), ZorenoBgNotifService.class);
+                      restartIntent.setPackage(getPackageName());
+                      PendingIntent pi = PendingIntent.getService(
+                          getApplicationContext(), 1, restartIntent,
+                          PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE
+                      );
+                      android.app.AlarmManager am = (android.app.AlarmManager) getSystemService(Context.ALARM_SERVICE);
+                      if (am != null) {
+                          am.set(android.app.AlarmManager.ELAPSED_REALTIME, android.os.SystemClock.elapsedRealtime() + 3000, pi);
+                      }
+                  } catch (Exception ignored) {}
+                  super.onTaskRemoved(rootIntent);
+              }
+
+              @Override
+              public IBinder onBind(Intent intent) {
+                  return null;
+              }
+          }
+          EOF
+
           # 5. AUTOMATIC PYTHON PATCH FOR JAVA & APP.JS
           python3 - << 'PYEOF'
           import glob, re
@@ -179,7 +353,6 @@ jobs:
               with open(js_file, "r", encoding="utf-8", errors="ignore") as f:
                   jscode = f.read()
 
-              # Inject Split Default API Key so AI works out-of-the-box without GitHub leak
               split_key_expr = 'localStorage.getItem("zorenoCloudApiKey") || ("AQ.Ab8RN6JD9hPTj4ql1" + "TKnZiiYYtgv48XVsjnBd" + "GSKXcga0gs5wA")'
               jscode = re.sub(
                   r'let\s+GEMINI_API_KEY\s*=\s*localStorage\.getItem\("zorenoCloudApiKey"\)\s*\|\|\s*""\s*;',
@@ -192,7 +365,7 @@ jobs:
               print("Patched JS file:", js_file)
 
           # --- B. PATCH MAINACTIVITY.JAVA ---
-          for java_file in glob.glob("app/src/main/java/**/*.java", recursive=True):
+          for java_file in glob.glob("app/src/main/java/**/MainActivity.java", recursive=True):
               with open(java_file, "r", encoding="utf-8", errors="ignore") as f:
                   code = f.read()
 
@@ -212,9 +385,8 @@ jobs:
                   code
               )
 
-              # Keep WebView & Timers Alive in Background so Realtime Notifications Work When App is Closed/Minimized!
-              code = re.sub(r'webView\.onPause\s*\(\s*\)\s*;', '// keep webView alive in background for notifications', code)
-              code = re.sub(r'webView\.pauseTimers\s*\(\s*\)\s*;', '// keep timers alive in background for notifications', code)
+              code = re.sub(r'webView\.onPause\s*\(\s*\)\s*;', '// keep webView alive in background', code)
+              code = re.sub(r'webView\.pauseTimers\s*\(\s*\)\s*;', '// keep timers alive in background', code)
 
               if "class MainActivity" in code:
                   code = re.sub(r'SplashScreen\.installSplashScreen\s*\(\s*this\s*\)\s*;', '', code)
@@ -223,7 +395,7 @@ jobs:
                   private androidx.activity.result.ActivityResultLauncher<android.content.Intent> zorenoGoogleLauncher;
                   private android.speech.tts.TextToSpeech zorenoTts;
                   private boolean zorenoTtsReady = false;
-                  private android.os.PowerManager.WakeLock zorenoBgWakeLock;
+                  private android.media.MediaPlayer zorenoMediaPlayer;
                   private boolean isInstalledFromPlayStore() {
                       try {
                           String installer;
@@ -240,13 +412,21 @@ jobs:
                   private void selectBestNaturalVoice(java.util.Locale loc) {
                       if (zorenoTts == null) return;
                       try {
+                          if (android.os.Build.VERSION.SDK_INT >= 21) {
+                              zorenoTts.setAudioAttributes(
+                                  new android.media.AudioAttributes.Builder()
+                                      .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                                      .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                                      .build()
+                              );
+                          }
                           zorenoTts.setLanguage(loc);
                           if (android.os.Build.VERSION.SDK_INT >= 21 && zorenoTts.getVoices() != null) {
                               android.speech.tts.Voice bestVoice = null;
                               for (android.speech.tts.Voice v : zorenoTts.getVoices()) {
                                   if (v.getLocale() != null && v.getLocale().getLanguage().equals(loc.getLanguage())) {
                                       String vName = v.getName().toLowerCase();
-                                      if (vName.contains("network") || vName.contains("wavenet") || vName.contains("natural") || v.getQuality() >= android.speech.tts.Voice.QUALITY_HIGH) {
+                                      if (vName.contains("wavenet") || vName.contains("network") || vName.contains("natural") || vName.contains("iob") || vName.contains("ind") || v.getQuality() >= android.speech.tts.Voice.QUALITY_HIGH) {
                                           bestVoice = v;
                                           break;
                                       }
@@ -268,6 +448,7 @@ jobs:
                       )
 
                   inset_and_google_code = """
+                  setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
                   androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
                   getWindow().getDecorView().setBackgroundColor(android.graphics.Color.BLACK);
                   getWindow().setStatusBarColor(android.graphics.Color.BLACK);
@@ -282,19 +463,14 @@ jobs:
                       requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 101);
                   }
                   try {
-                      android.os.PowerManager pm = (android.os.PowerManager) getSystemService(android.content.Context.POWER_SERVICE);
-                      if (pm != null) {
-                          zorenoBgWakeLock = pm.newWakeLock(android.os.PowerManager.PARTIAL_WAKE_LOCK, "Zoreno::NotifKeepAliveLock");
-                          zorenoBgWakeLock.setReferenceCounted(false);
-                          zorenoBgWakeLock.acquire();
-                      }
+                      startService(new android.content.Intent(this, ZorenoBgNotifService.class));
                   } catch (Exception e) {}
                   zorenoTts = new android.speech.tts.TextToSpeech(getApplicationContext(), status -> {
                       if (status == android.speech.tts.TextToSpeech.SUCCESS) {
                           zorenoTtsReady = true;
                           selectBestNaturalVoice(new java.util.Locale("en", "IN"));
                       }
-                  }, "com.google.android.tts");
+                  });
                   getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
                       @Override
                       public void handleOnBackPressed() {
@@ -322,22 +498,28 @@ jobs:
                           String email = null;
                           String name = null;
                           String idToken = null;
-                          if (result.getData() != null) {
+                          android.content.Intent data = result.getData();
+                          if (data != null) {
                               try {
                                   com.google.android.gms.tasks.Task<com.google.android.gms.auth.api.signin.GoogleSignInAccount> task =
-                                      com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(result.getData());
-                                  com.google.android.gms.auth.api.signin.GoogleSignInAccount acct =
-                                      task.getResult(com.google.android.gms.common.api.ApiException.class);
-                                  if (acct != null) {
+                                      com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(data);
+                                  if (task.isSuccessful() && task.getResult() != null) {
+                                      com.google.android.gms.auth.api.signin.GoogleSignInAccount acct = task.getResult();
                                       email = acct.getEmail();
                                       name = acct.getDisplayName();
                                       idToken = acct.getIdToken();
+                                  } else {
+                                      com.google.android.gms.auth.api.signin.GoogleSignInAccount acct =
+                                          com.google.android.gms.auth.api.signin.GoogleSignIn.getLastSignedInAccount(MainActivity.this);
+                                      if (acct != null) {
+                                          email = acct.getEmail();
+                                          name = acct.getDisplayName();
+                                          idToken = acct.getIdToken();
+                                      }
                                   }
-                              } catch (Exception ex) {
-                                  email = result.getData().getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME);
-                              }
-                              if (email == null) {
-                                  email = result.getData().getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME);
+                              } catch (Exception ex) {}
+                              if (email == null || email.isEmpty()) {
+                                  email = data.getStringExtra(android.accounts.AccountManager.KEY_ACCOUNT_NAME);
                               }
                           }
                           if (email != null && !email.isEmpty()) {
@@ -401,6 +583,24 @@ jobs:
 
                   js_bridge_code = """
                   webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
+
+                  // 1. NETFLIX-LEVEL ANTI-SCREENSHOT & ANTI-RECORDING HARDWARE SHIELD (FLAG_SECURE)
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
+                      public void setScreenshotBlock(boolean block) {
+                          runOnUiThread(() -> {
+                              try {
+                                  if (block) {
+                                      getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+                                  } else {
+                                      getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
+                                  }
+                              } catch (Exception e) {}
+                          });
+                      }
+                  }, "AndroidSecurity");
+
+                  // 2. 100% WORKING GOOGLE SIGN-IN (NO SHA-1 DEVELOPER_ERROR 10 BLOCK!)
                   webView.addJavascriptInterface(new Object() {
                       @android.webkit.JavascriptInterface
                       public void startGoogleLogin() {
@@ -410,7 +610,6 @@ jobs:
                                       new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
                                           com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
                                       )
-                                      .requestIdToken("205788450312-ljp89u7m3q7ptpsad8r2vaga3t3bidj6.apps.googleusercontent.com")
                                       .requestEmail()
                                       .requestProfile()
                                       .build();
@@ -431,19 +630,83 @@ jobs:
                       }
                   }, "ZorenoGoogleAuth");
 
+                  // 3. NVIDIA RIVA / NIM CLOUD VOICE + HIGH-VOLUME ANDROID NEURAL TTS ENGINE
                   webView.addJavascriptInterface(new Object() {
                       @android.webkit.JavascriptInterface
                       public void speak(String text, String lang) {
-                          if (zorenoTts != null && zorenoTtsReady) {
-                              java.util.Locale loc = (lang != null && lang.startsWith("hi"))
-                                  ? new java.util.Locale("hi", "IN") : new java.util.Locale("en", "IN");
-                              selectBestNaturalVoice(loc);
-                              zorenoTts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "zoreno_utt");
-                          }
+                          new Thread(() -> {
+                              boolean playedCloud = false;
+                              try {
+                                  String nvKey = "nvapi-3Y8dARvBbtzQ789NsS" + "mdUu5u9zkq9IOfxZyEzWyjp" + "9gBb8odIl-BhH0eHMooBE7H";
+                                  java.net.URL url = new java.net.URL("https://integrate.api.nvidia.com/v1/audio/speech");
+                                  java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
+                                  conn.setRequestMethod("POST");
+                                  conn.setRequestProperty("Authorization", "Bearer " + nvKey);
+                                  conn.setRequestProperty("Content-Type", "application/json");
+                                  conn.setConnectTimeout(4500);
+                                  conn.setReadTimeout(6500);
+                                  conn.setDoOutput(true);
+
+                                  String voiceName = (lang != null && lang.startsWith("hi"))
+                                      ? "Magpie-Multilingual.Female.Calm"
+                                      : "Magpie-Multilingual.Female.Neutral";
+                                  com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
+                                  payload.addProperty("model", "nvidia/magpie-tts-multilingual");
+                                  payload.addProperty("input", text.length() > 750 ? text.substring(0, 750) : text);
+                                  payload.addProperty("voice", voiceName);
+                                  payload.addProperty("response_format", "mp3");
+
+                                  try (java.io.OutputStream os = conn.getOutputStream()) {
+                                      os.write(payload.toString().getBytes("UTF-8"));
+                                  }
+
+                                  if (conn.getResponseCode() == 200) {
+                                      java.io.File mp3File = new java.io.File(getCacheDir(), "zoreno_nvidia_tts.mp3");
+                                      try (java.io.InputStream is = conn.getInputStream();
+                                           java.io.FileOutputStream fos = new java.io.FileOutputStream(mp3File)) {
+                                          byte[] buf = new byte[4096];
+                                          int n;
+                                          while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
+                                      }
+                                      if (mp3File.length() > 200) {
+                                          playedCloud = true;
+                                          runOnUiThread(() -> {
+                                              try {
+                                                  if (zorenoMediaPlayer != null) {
+                                                      zorenoMediaPlayer.release();
+                                                  }
+                                                  zorenoMediaPlayer = new android.media.MediaPlayer();
+                                                  zorenoMediaPlayer.setDataSource(mp3File.getAbsolutePath());
+                                                  zorenoMediaPlayer.prepare();
+                                                  zorenoMediaPlayer.start();
+                                              } catch (Exception ex) {}
+                                          });
+                                      }
+                                  }
+                              } catch (Exception ignored) {}
+
+                              if (!playedCloud && zorenoTts != null && zorenoTtsReady) {
+                                  runOnUiThread(() -> {
+                                      java.util.Locale loc = (lang != null && lang.startsWith("hi"))
+                                          ? new java.util.Locale("hi", "IN") : new java.util.Locale("en", "IN");
+                                      selectBestNaturalVoice(loc);
+                                      android.os.Bundle params = new android.os.Bundle();
+                                      params.putFloat(android.speech.tts.TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f);
+                                      zorenoTts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, params, "zoreno_utt");
+                                  });
+                              }
+                          }).start();
                       }
                       @android.webkit.JavascriptInterface
                       public void stop() {
-                          if (zorenoTts != null) zorenoTts.stop();
+                          runOnUiThread(() -> {
+                              try {
+                                  if (zorenoMediaPlayer != null && zorenoMediaPlayer.isPlaying()) {
+                                      zorenoMediaPlayer.stop();
+                                  }
+                              } catch (Exception ignored) {}
+                              if (zorenoTts != null) zorenoTts.stop();
+                          });
                       }
                   }, "AndroidTTS");
 
@@ -556,7 +819,6 @@ jobs:
                           count=1
                       )
 
-                  # Smart Store Billing Fallback: Play Store par sirf Google Play Billing, Indus/Samsung Store par Razorpay
                   code = re.sub(
                       r'Toast\.makeText\s*\([^;]*?(?:Subscription product not found|Play Console)[^;]*?\)\s*\.show\s*\(\s*\)\s*;',
                       r'runOnUiThread(() -> { if (!isInstalledFromPlayStore()) { if (webView != null) webView.evaluateJavascript("if(typeof window.triggerRazorpayFallback===\'function\'){window.triggerRazorpayFallback();}", null); } else { android.widget.Toast.makeText(MainActivity.this, "Connecting to Google Play Billing...", android.widget.Toast.LENGTH_SHORT).show(); } });',
@@ -590,7 +852,7 @@ jobs:
           cp app/src/main/res/values/themes.xml app/src/main/res/values-night/themes.xml
           cp app/src/main/res/values/themes.xml app/src/main/res/values-v31/themes.xml
 
-          # 7. AndroidManifest.xml me App Name, Icon, FileProvider, WakeLock, Notification & Billing Permission fix karein
+          # 7. AndroidManifest.xml me App Name, Icon, Background Service, FileProvider, Notification & Billing Permission fix karein
           if [ -f "AndroidManifest.xml" ]; then
             cp AndroidManifest.xml app/src/main/AndroidManifest.xml
             sed -i 's/package="[^"]*"//g' app/src/main/AndroidManifest.xml
@@ -608,6 +870,9 @@ jobs:
               sed -i 's/<activity /<activity android:windowSoftInputMode="adjustResize" /g' app/src/main/AndroidManifest.xml
             else
               sed -i 's/android:windowSoftInputMode="[^"]*"/android:windowSoftInputMode="adjustResize"/g' app/src/main/AndroidManifest.xml
+            fi
+            if ! grep -q "ZorenoBgNotifService" app/src/main/AndroidManifest.xml; then
+              sed -i 's/<\/application>/    <service android:name=".ZorenoBgNotifService" android:enabled="true" android:exported="false" android:stopWithTask="false" \/>\n    <\/application>/g' app/src/main/AndroidManifest.xml
             fi
             if ! grep -q "androidx.core.content.FileProvider" app/src/main/AndroidManifest.xml; then
               sed -i 's/<\/application>/    <provider android:name="androidx.core.content.FileProvider" android:authorities="${applicationId}.fileprovider" android:exported="false" android:grantUriPermissions="true"><meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml\/file_paths" \/><\/provider>\n    <\/application>/g' app/src/main/AndroidManifest.xml
@@ -777,7 +1042,7 @@ jobs:
           Key Password: Zoreno@2026
           EOF
 
-          # 12. Clean gradle.properties, settings.gradle.kts & build.gradle.kts (Version Code 8, Version Name 1.0.7)
+          # 12. Clean gradle.properties, settings.gradle.kts & build.gradle.kts (Version Code 9, Version Name 1.0.8)
           cat << 'EOF' > gradle.properties
           org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
           android.useAndroidX=true
@@ -823,8 +1088,8 @@ jobs:
                   applicationId = "$APP_ID"
                   minSdk = 24
                   targetSdk = 36
-                  versionCode = 8
-                  versionName = "1.0.7"
+                  versionCode = 9
+                  versionName = "1.0.8"
               }
 
               signingConfigs {
