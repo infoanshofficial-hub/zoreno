@@ -32,6 +32,10 @@ jobs:
           [ -f "app.js" ] && cp -f app.js /tmp/zoreno_latest_backup/app.js || true
           [ -f "style.css" ] && cp -f style.css /tmp/zoreno_latest_backup/style.css || true
           [ -f "splash.png" ] && cp -f splash.png /tmp/zoreno_latest_backup/splash.png || true
+          [ -f "logo.png" ] && cp -f logo.png /tmp/zoreno_latest_backup/logo.png || true
+          [ -f "icon.png" ] && cp -f icon.png /tmp/zoreno_latest_backup/icon.png || true
+          [ -f "MainActivity.java" ] && cp -f MainActivity.java /tmp/zoreno_latest_backup/MainActivity.java || true
+          [ -f "AndroidManifest.xml" ] && cp -f AndroidManifest.xml /tmp/zoreno_latest_backup/AndroidManifest.xml || true
 
           rm -rf app build .gradle gradle libs.versions.toml
           for z in *.zip; do
@@ -42,17 +46,19 @@ jobs:
           [ -f "/tmp/zoreno_latest_backup/app.js" ] && cp -f /tmp/zoreno_latest_backup/app.js app.js || true
           [ -f "/tmp/zoreno_latest_backup/style.css" ] && cp -f /tmp/zoreno_latest_backup/style.css style.css || true
           [ -f "/tmp/zoreno_latest_backup/splash.png" ] && cp -f /tmp/zoreno_latest_backup/splash.png splash.png || true
+          [ -f "/tmp/zoreno_latest_backup/logo.png" ] && cp -f /tmp/zoreno_latest_backup/logo.png logo.png || true
+          [ -f "/tmp/zoreno_latest_backup/icon.png" ] && cp -f /tmp/zoreno_latest_backup/icon.png icon.png || true
           rm -f *firebase-adminsdk*.json
 
           [ -f "index.html" ] && cp -f index.html index_912f1626.html || true
           [ -f "app.js" ] && cp -f app.js app_2ae41a74.js || true
           [ -f "style.css" ] && cp -f style.css style_bd461784.css || true
 
-          PKG_NAME=""
+          PKG_NAME="com.example"
           if [ -f "MainActivity.java" ]; then
-            PKG_NAME=$(grep -oP '^package\s+\K[^;]+' MainActivity.java | tr -d '[:space:]' || true)
+            DETECTED_PKG=$(grep -oP '^package\s+\K[^;]+' MainActivity.java | tr -d '[:space:]' || true)
+            [ -n "$DETECTED_PKG" ] && PKG_NAME="$DETECTED_PKG"
           fi
-          [ -z "$PKG_NAME" ] && PKG_NAME="com.zoreno.app"
           PKG_DIR=$(echo "$PKG_NAME" | tr '.' '/')
           if [[ "$PKG_NAME" == com.example* ]]; then
             APP_ID="com.zoreno.app"
@@ -290,355 +296,6 @@ jobs:
               jscode = re.sub(r'let\s+GEMINI_API_KEY\s*=\s*localStorage\.getItem\("zorenoCloudApiKey"\)\s*\|\|\s*""\s*;', f'let GEMINI_API_KEY = {split_key_expr};', jscode)
               with open(js_file, "w", encoding="utf-8") as f:
                   f.write(jscode)
-
-          for java_file in glob.glob("app/src/main/java/**/MainActivity.java", recursive=True):
-              with open(java_file, "r", encoding="utf-8", errors="ignore") as f:
-                  code = f.read()
-              code = re.sub(r'\.enablePendingPurchases\s*\(\s*\)', '.enablePendingPurchases(com.android.billingclient.api.PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())', code)
-              code = re.sub(r'\bproductDetailsList\.isEmpty\s*\(\s*\)', 'productDetailsList.getProductDetailsList().isEmpty()', code)
-              code = re.sub(r'\bproductDetailsList\.get\s*\(\s*0\s*\)', 'productDetailsList.getProductDetailsList().get(0)', code)
-              if "class MainActivity" in code:
-                  code = re.sub(r'SplashScreen\.installSplashScreen\s*\(\s*this\s*\)\s*;', '', code)
-                  extra_fields = """
-                  private androidx.activity.result.ActivityResultLauncher<android.content.Intent> zorenoGoogleLauncher;
-                  private android.speech.tts.TextToSpeech zorenoTts;
-                  private boolean zorenoTtsReady = false;
-                  private android.media.MediaPlayer zorenoMediaPlayer;
-                  private com.google.android.gms.ads.rewarded.RewardedAd zorenoRewardedAd;
-                  private com.google.android.gms.ads.interstitial.InterstitialAd zorenoInterstitialAd;
-                  private com.google.android.play.core.appupdate.AppUpdateManager zorenoAppUpdateManager;
-                  private void loadZorenoInterstitialAd() {
-                      runOnUiThread(() -> {
-                          try {
-                              com.google.android.gms.ads.AdRequest req = new com.google.android.gms.ads.AdRequest.Builder().build();
-                              com.google.android.gms.ads.interstitial.InterstitialAd.load(MainActivity.this, "ca-app-pub-5825754850490611/8668190362", req, new com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback() {
-                                  @Override public void onAdLoaded(com.google.android.gms.ads.interstitial.InterstitialAd ad) { zorenoInterstitialAd = ad; }
-                                  @Override public void onAdFailedToLoad(com.google.android.gms.ads.LoadAdError err) { zorenoInterstitialAd = null; }
-                              });
-                          } catch (Exception ignored) {}
-                      });
-                  }
-                  private void checkAndStartPlayImmediateUpdate() {
-                      try {
-                          if (zorenoAppUpdateManager == null) {
-                              zorenoAppUpdateManager = com.google.android.play.core.appupdate.AppUpdateManagerFactory.create(this);
-                          }
-                          zorenoAppUpdateManager.getAppUpdateInfo().addOnSuccessListener(info -> {
-                              if (info.updateAvailability() == com.google.android.play.core.install.model.UpdateAvailability.UPDATE_AVAILABLE
-                                  && info.isUpdateTypeAllowed(com.google.android.play.core.install.model.AppUpdateType.IMMEDIATE)) {
-                                  try {
-                                      zorenoAppUpdateManager.startUpdateFlowForResult(info, com.google.android.play.core.install.model.AppUpdateType.IMMEDIATE, MainActivity.this, 9911);
-                                  } catch (Exception ignored) {}
-                              }
-                          });
-                      } catch (Exception ignored) {}
-                  }
-                  private boolean isInstalledFromPlayStore() {
-                      try {
-                          String installer = (android.os.Build.VERSION.SDK_INT >= 30)
-                              ? getPackageManager().getInstallSourceInfo(getPackageName()).getInstallingPackageName()
-                              : getPackageManager().getInstallerPackageName(getPackageName());
-                          return "com.android.vending".equals(installer) || "com.google.android.feedback".equals(installer);
-                      } catch (Exception e) { return false; }
-                  }
-                  private void loadZorenoRewardedAd(String unitId) {
-                      runOnUiThread(() -> {
-                          try {
-                              String adUnit = (unitId != null && !unitId.isEmpty()) ? unitId : "ca-app-pub-5825754850490611/4904670790";
-                              com.google.android.gms.ads.AdRequest adRequest = new com.google.android.gms.ads.AdRequest.Builder().build();
-                              com.google.android.gms.ads.rewarded.RewardedAd.load(MainActivity.this, adUnit, adRequest, new com.google.android.gms.ads.rewarded.RewardedAdLoadCallback() {
-                                  @Override public void onAdLoaded(com.google.android.gms.ads.rewarded.RewardedAd ad) { zorenoRewardedAd = ad; }
-                                  @Override public void onAdFailedToLoad(com.google.android.gms.ads.LoadAdError err) { zorenoRewardedAd = null; }
-                              });
-                          } catch (Exception ignored) {}
-                      });
-                  }
-                  private void selectBestNaturalVoice(java.util.Locale loc) {
-                      if (zorenoTts == null) return;
-                      try {
-                          if (android.os.Build.VERSION.SDK_INT >= 21) {
-                              zorenoTts.setAudioAttributes(new android.media.AudioAttributes.Builder().setUsage(android.media.AudioAttributes.USAGE_MEDIA).setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH).build());
-                          }
-                          zorenoTts.setLanguage(loc);
-                      } catch (Exception e) {}
-                  }
-                  """
-                  if "zorenoGoogleLauncher" not in code:
-                      code = re.sub(r'(class\s+MainActivity\s+extends\s+[^{]+\{)', r'\1\n' + extra_fields, code, count=1)
-
-                  inset_code = """
-                  setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
-                  androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-                  getWindow().getDecorView().setBackgroundColor(android.graphics.Color.parseColor("#F5F0FF"));
-                  getWindow().setStatusBarColor(android.graphics.Color.BLACK);
-                  getWindow().setNavigationBarColor(android.graphics.Color.BLACK);
-                  if (android.os.Build.VERSION.SDK_INT >= 33) { requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 101); }
-                  try {
-                      com.google.android.gms.ads.MobileAds.initialize(this, status -> {
-                          loadZorenoRewardedAd("ca-app-pub-5825754850490611/4904670790");
-                          loadZorenoInterstitialAd();
-                          checkAndStartPlayImmediateUpdate();
-                      });
-                  } catch (Exception e) {}
-                  try { startService(new android.content.Intent(this, ZorenoBgNotifService.class)); } catch (Exception e) {}
-                  zorenoTts = new android.speech.tts.TextToSpeech(getApplicationContext(), status -> {
-                      if (status == android.speech.tts.TextToSpeech.SUCCESS) {
-                          zorenoTtsReady = true;
-                          selectBestNaturalVoice(new java.util.Locale("en", "IN"));
-                      }
-                  });
-                  getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
-                      @Override public void handleOnBackPressed() {
-                          if (webView != null) {
-                              webView.evaluateJavascript("(window.handleZorenoHardwareBack && window.handleZorenoHardwareBack()) ? 'HANDLED' : 'EXIT'", res -> {
-                                  if (res == null || !res.contains("HANDLED")) {
-                                      if (webView.canGoBack()) webView.goBack(); else moveTaskToBack(true);
-                                  }
-                              });
-                          } else { moveTaskToBack(true); }
-                      }
-                  });
-                  zorenoGoogleLauncher = registerForActivityResult(new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(), result -> {
-                      String email = null, name = null, idToken = null;
-                      android.content.Intent data = result.getData();
-                      if (data != null) {
-                          try {
-                              com.google.android.gms.tasks.Task<com.google.android.gms.auth.api.signin.GoogleSignInAccount> task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(data);
-                              if (task.isSuccessful() && task.getResult() != null) {
-                                  email = task.getResult().getEmail(); name = task.getResult().getDisplayName(); idToken = task.getResult().getIdToken();
-                              }
-                          } catch (Exception ex) {}
-                      }
-                      if (email != null && !email.isEmpty()) {
-                          if (name == null || name.isEmpty()) name = email.split("@")[0];
-                          final String sE = email.replace("'", "\\'"); final String sN = name.replace("'", "\\'"); final String sT = idToken != null ? idToken.replace("'", "\\'") : "";
-                          runOnUiThread(() -> { if (webView != null) webView.evaluateJavascript("if(window.onZorenoNativeGoogleLogin){window.onZorenoNativeGoogleLogin('" + sE + "','" + sN + "','" + sT + "');}", null); });
-                      }
-                  });
-                  """
-                  if "zorenoGoogleLauncher = registerForActivityResult" not in code:
-                      code = re.sub(r'(super\.onCreate\s*\([^)]*\)\s*;)', r'\1\n' + inset_code, code, count=1)
-
-                  js_bridge = """
-                  webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
-                  webView.addJavascriptInterface(new Object() {
-                      @android.webkit.JavascriptInterface
-                      public void setScreenshotBlock(boolean block) {
-                          runOnUiThread(() -> {
-                              try {
-                                  if (block) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
-                                  else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
-                              } catch (Exception e) {}
-                          });
-                      }
-                  }, "AndroidSecurity");
-
-                  webView.addJavascriptInterface(new Object() {
-                      @android.webkit.JavascriptInterface
-                      public void signIn() { startGoogleLogin(); }
-                      @android.webkit.JavascriptInterface
-                      public void startGoogleLogin() {
-                          runOnUiThread(() -> {
-                              try {
-                                  com.google.android.gms.auth.api.signin.GoogleSignInOptions gso = new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN).requestIdToken("205788450312-ljp89u7m3q7ptpsad8r2vaga3t3bidj6.apps.googleusercontent.com").requestEmail().requestProfile().build();
-                                  com.google.android.gms.auth.api.signin.GoogleSignInClient client = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(MainActivity.this, gso);
-                                  client.signOut().addOnCompleteListener(t -> zorenoGoogleLauncher.launch(client.getSignInIntent()));
-                              } catch (Exception e) {}
-                          });
-                      }
-                  }, "ZorenoGoogleAuth");
-
-                  webView.addJavascriptInterface(new Object() {
-                      @android.webkit.JavascriptInterface
-                      public void showRewardedAd(String unitId) {
-                          runOnUiThread(() -> {
-                              if (zorenoRewardedAd != null) {
-                                  zorenoRewardedAd.show(MainActivity.this, reward -> {
-                                      if (webView != null) webView.evaluateJavascript("if(window.onAdMobRewardGranted){window.onAdMobRewardGranted();}", null);
-                                      zorenoRewardedAd = null; loadZorenoRewardedAd(unitId);
-                                  });
-                              } else {
-                                  loadZorenoRewardedAd(unitId);
-                                  if (webView != null) webView.evaluateJavascript("if(window.onAdMobRewardGranted){window.onAdMobRewardGranted();}", null);
-                              }
-                          });
-                      }
-                      @android.webkit.JavascriptInterface
-                      public void showInterstitialAd() {
-                          runOnUiThread(() -> {
-                              if (zorenoInterstitialAd != null) {
-                                  zorenoInterstitialAd.show(MainActivity.this);
-                                  zorenoInterstitialAd = null;
-                                  loadZorenoInterstitialAd();
-                              } else {
-                                  loadZorenoInterstitialAd();
-                              }
-                          });
-                      }
-                  }, "AndroidAdMob");
-
-                  webView.addJavascriptInterface(new Object() {
-                      @android.webkit.JavascriptInterface
-                      public void speakNeural(String text, String lang) {
-                          new Thread(() -> {
-                              boolean playedCloud = false;
-                              try {
-                                  String nvKey = "nvapi-3Y8dARvBbtzQ789NsS" + "mdUu5u9zkq9IOfxZyEzWyjp" + "9gBb8odIl-BhH0eHMooBE7H";
-                                  java.net.URL url = new java.net.URL("https://integrate.api.nvidia.com/v1/audio/speech");
-                                  java.net.HttpURLConnection conn = (java.net.HttpURLConnection) url.openConnection();
-                                  conn.setRequestMethod("POST"); conn.setRequestProperty("Authorization", "Bearer " + nvKey);
-                                  conn.setRequestProperty("Content-Type", "application/json");
-                                  conn.setConnectTimeout(4500); conn.setReadTimeout(6500); conn.setDoOutput(true);
-                                  String voiceName = (lang != null && lang.startsWith("hi")) ? "Magpie-Multilingual.Female.Calm" : "Magpie-Multilingual.Female.Neutral";
-                                  com.google.gson.JsonObject payload = new com.google.gson.JsonObject();
-                                  payload.addProperty("model", "nvidia/magpie-tts-multilingual");
-                                  payload.addProperty("input", text.length() > 800 ? text.substring(0, 800) : text);
-                                  payload.addProperty("voice", voiceName); payload.addProperty("response_format", "mp3");
-                                  try (java.io.OutputStream os = conn.getOutputStream()) { os.write(payload.toString().getBytes("UTF-8")); }
-                                  if (conn.getResponseCode() == 200) {
-                                      java.io.File mp3File = new java.io.File(getCacheDir(), "zoreno_nvidia_tts.mp3");
-                                      try (java.io.InputStream is = conn.getInputStream(); java.io.FileOutputStream fos = new java.io.FileOutputStream(mp3File)) {
-                                          byte[] buf = new byte[4096]; int n; while ((n = is.read(buf)) != -1) fos.write(buf, 0, n);
-                                      }
-                                      if (mp3File.length() > 200) {
-                                          playedCloud = true;
-                                          runOnUiThread(() -> {
-                                              try {
-                                                  if (zorenoMediaPlayer != null) zorenoMediaPlayer.release();
-                                                  zorenoMediaPlayer = new android.media.MediaPlayer();
-                                                  zorenoMediaPlayer.setDataSource(mp3File.getAbsolutePath());
-                                                  zorenoMediaPlayer.prepare(); zorenoMediaPlayer.start();
-                                              } catch (Exception ex) {}
-                                          });
-                                      }
-                                  }
-                              } catch (Exception ignored) {}
-                              if (!playedCloud && zorenoTts != null && zorenoTtsReady) {
-                                  runOnUiThread(() -> {
-                                      java.util.Locale loc = java.util.Locale.forLanguageTag(lang != null ? lang : "en-IN");
-                                      selectBestNaturalVoice(loc);
-                                      zorenoTts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "zoreno_utt");
-                                  });
-                              }
-                          }).start();
-                      }
-                      @android.webkit.JavascriptInterface
-                      public void speak(String text, String lang) {
-                          if (zorenoTts != null && zorenoTtsReady) {
-                              runOnUiThread(() -> {
-                                  zorenoTts.setLanguage(java.util.Locale.forLanguageTag(lang != null ? lang : "en-IN"));
-                                  zorenoTts.speak(text, android.speech.tts.TextToSpeech.QUEUE_FLUSH, null, "zoreno_basic");
-                              });
-                          }
-                      }
-                      @android.webkit.JavascriptInterface
-                      public void stop() {
-                          runOnUiThread(() -> {
-                              try { if (zorenoMediaPlayer != null && zorenoMediaPlayer.isPlaying()) zorenoMediaPlayer.stop(); } catch (Exception ignored) {}
-                              if (zorenoTts != null) zorenoTts.stop();
-                          });
-                      }
-                  }, "AndroidTTS");
-
-                  webView.addJavascriptInterface(new Object() {
-                      @android.webkit.JavascriptInterface
-                      public String getString(String key, String defVal) { return getSharedPreferences("ZorenoQuotaPrefs", MODE_PRIVATE).getString(key, defVal); }
-                      @android.webkit.JavascriptInterface
-                      public void setString(String key, String val) { getSharedPreferences("ZorenoQuotaPrefs", MODE_PRIVATE).edit().putString(key, val).apply(); }
-                      @android.webkit.JavascriptInterface
-                      public boolean isFromPlayStore() { return isInstalledFromPlayStore(); }
-                  }, "AndroidPrefs");
-
-                  webView.addJavascriptInterface(new Object() {
-                      @android.webkit.JavascriptInterface
-                      public void checkForImmediateUpdate() { runOnUiThread(() -> checkAndStartPlayImmediateUpdate()); }
-                      @android.webkit.JavascriptInterface
-                      public void startImmediateUpdate() { runOnUiThread(() -> checkAndStartPlayImmediateUpdate()); }
-                  }, "AndroidAppUpdate");
-
-                  webView.addJavascriptInterface(new Object() {
-                      @android.webkit.JavascriptInterface
-                      public void saveBase64File(String dataUrl, String fileName, String mimeType) {
-                          new Thread(() -> {
-                              try {
-                                  String b64 = dataUrl.contains(",") ? dataUrl.split(",")[1] : dataUrl;
-                                  byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
-                                  java.io.File outDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS);
-                                  if (!outDir.exists()) outDir.mkdirs();
-                                  String safeName = (fileName != null && !fileName.isEmpty()) ? fileName : ("Zoreno_" + System.currentTimeMillis() + ".pdf");
-                                  java.io.File outFile = new java.io.File(outDir, safeName);
-                                  if (outFile.exists()) {
-                                      int dot = safeName.lastIndexOf('.');
-                                      String base = dot > 0 ? safeName.substring(0, dot) : safeName;
-                                      String ext = dot > 0 ? safeName.substring(dot) : "";
-                                      outFile = new java.io.File(outDir, base + "_" + (System.currentTimeMillis() % 10000) + ext);
-                                  }
-                                  try (java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile)) {
-                                      fos.write(bytes);
-                                  }
-                              } catch (Exception ignored) {}
-                          }).start();
-                      }
-                      @android.webkit.JavascriptInterface
-                      public void downloadImage(String dataUrl, String fileName) {
-                          saveBase64File(dataUrl, fileName, "image/jpeg");
-                      }
-                  }, "AndroidDownloader");
-
-                  webView.addJavascriptInterface(new Object() {
-                      @android.webkit.JavascriptInterface
-                      public void shareText(String text) {
-                          try {
-                              android.content.Intent sendIntent = new android.content.Intent(android.content.Intent.ACTION_SEND);
-                              sendIntent.setType("text/plain"); sendIntent.putExtra(android.content.Intent.EXTRA_TEXT, text);
-                              startActivity(android.content.Intent.createChooser(sendIntent, "Share Zoreno Answer"));
-                          } catch (Exception e) {}
-                      }
-                      @android.webkit.JavascriptInterface
-                      public void shareBase64File(String dataUrl, String fileName, String mimeType) {
-                          new Thread(() -> {
-                              try {
-                                  String b64 = dataUrl.contains(",") ? dataUrl.split(",")[1] : dataUrl;
-                                  byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
-                                  String safeName = (fileName != null && !fileName.isEmpty()) ? fileName : ("Zoreno_File_" + System.currentTimeMillis() + ".pdf");
-                                  java.io.File outFile = new java.io.File(getCacheDir(), safeName);
-                                  try (java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile)) {
-                                      fos.write(bytes);
-                                  }
-                                  android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", outFile);
-                                  android.content.Intent shareIntent = new android.content.Intent(android.content.Intent.ACTION_SEND);
-                                  shareIntent.setType(mimeType != null && !mimeType.isEmpty() ? mimeType : "application/pdf");
-                                  shareIntent.putExtra(android.content.Intent.EXTRA_STREAM, uri);
-                                  shareIntent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                                  runOnUiThread(() -> startActivity(android.content.Intent.createChooser(shareIntent, "Share File")));
-                              } catch (Exception ignored) {}
-                          }).start();
-                      }
-                  }, "AndroidShare");
-
-                  webView.addJavascriptInterface(new Object() {
-                      @android.webkit.JavascriptInterface
-                      public void showNotification(String title, String msg) {
-                          try {
-                              android.app.NotificationManager nm = (android.app.NotificationManager) getSystemService(android.content.Context.NOTIFICATION_SERVICE);
-                              String chId = "zoreno_dm_channel_v5";
-                              if (android.os.Build.VERSION.SDK_INT >= 26) {
-                                  android.app.NotificationChannel ch = new android.app.NotificationChannel(chId, "Zoreno Messages", android.app.NotificationManager.IMPORTANCE_HIGH);
-                                  ch.enableVibration(true); nm.createNotificationChannel(ch);
-                              }
-                              androidx.core.app.NotificationCompat.Builder b = new androidx.core.app.NotificationCompat.Builder(MainActivity.this, chId)
-                                  .setSmallIcon(R.mipmap.ic_launcher).setContentTitle(title).setContentText(msg)
-                                  .setPriority(androidx.core.app.NotificationCompat.PRIORITY_HIGH).setAutoCancel(true);
-                              nm.notify((int) (System.currentTimeMillis() & 0xfffffff), b.build());
-                          } catch (Exception e) {}
-                      }
-                  }, "AndroidNotif");
-                  """
-                  if "ZorenoGoogleAuth" not in code:
-                      code = re.sub(r'(setJavaScriptEnabled\s*\(\s*true\s*\)\s*;)', r'\1\n' + js_bridge, code, count=1)
-
-              with open(java_file, "w", encoding="utf-8") as f:
-                  f.write(code)
           PYEOF
 
           rm -f app/src/main/res/values/styles.xml
@@ -653,48 +310,27 @@ jobs:
           cat << 'EOF' > app/src/main/res/values/themes.xml
           <resources xmlns:tools="http://schemas.android.com/tools">
               <style name="Theme.Zoreno" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-                  <item name="android:statusBarColor">#000000</item>
-                  <item name="android:navigationBarColor">#000000</item>
-                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:statusBarColor">#F4F0FF</item>
+                  <item name="android:navigationBarColor">#F4F0FF</item>
+                  <item name="android:windowLightStatusBar">true</item>
                   <item name="android:windowFullscreen">false</item>
                   <item name="android:fitsSystemWindows">true</item>
-                  <item name="android:windowBackground">@drawable/splash</item>
-                  <item name="android:windowSplashScreenBackground" tools:targetApi="31">#F5F0FF</item>
+                  <item name="android:windowBackground">#F4F0FF</item>
+                  <item name="android:windowSplashScreenBackground" tools:targetApi="31">#EFE8FF</item>
                   <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/transparent_splash_icon</item>
               </style>
+              <style name="Theme.MyApplication" parent="Theme.Zoreno" />
           </resources>
           EOF
           cp app/src/main/res/values/themes.xml app/src/main/res/values-night/themes.xml
           cp app/src/main/res/values/themes.xml app/src/main/res/values-v31/themes.xml
 
-          if [ -f "AndroidManifest.xml" ]; then
-            cp AndroidManifest.xml app/src/main/AndroidManifest.xml
-            sed -i 's/package="[^"]*"//g' app/src/main/AndroidManifest.xml
-            sed -i 's/android:label="[^"]*"/android:label="@string\/app_name"/g' app/src/main/AndroidManifest.xml
-            sed -i 's/android:theme="[^"]*"/android:theme="@style\/Theme.Zoreno"/g' app/src/main/AndroidManifest.xml
-            sed -i 's/android:icon="[^"]*"/android:icon="@mipmap\/ic_launcher"/g' app/src/main/AndroidManifest.xml
-            sed -i 's/android:roundIcon="[^"]*"/android:roundIcon="@mipmap\/ic_launcher_round"/g' app/src/main/AndroidManifest.xml
-            if ! grep -q "POST_NOTIFICATIONS" app/src/main/AndroidManifest.xml; then
-              sed -i 's/<application/<uses-permission android:name="android.permission.POST_NOTIFICATIONS" \/>\n    <uses-permission android:name="android.permission.WAKE_LOCK" \/>\n    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" \/>\n    <application/g' app/src/main/AndroidManifest.xml
-            fi
-            if ! grep -q "com.android.vending.BILLING" app/src/main/AndroidManifest.xml; then
-              sed -i 's/<application/<uses-permission android:name="com.android.vending.BILLING" \/>\n    <application/g' app/src/main/AndroidManifest.xml
-            fi
-            if ! grep -q "windowSoftInputMode" app/src/main/AndroidManifest.xml; then
-              sed -i 's/<activity /<activity android:windowSoftInputMode="adjustResize" /g' app/src/main/AndroidManifest.xml
-            else
-              sed -i 's/android:windowSoftInputMode="[^"]*"/android:windowSoftInputMode="adjustResize"/g' app/src/main/AndroidManifest.xml
-            fi
-            if ! grep -q "com.google.android.gms.ads.APPLICATION_ID" app/src/main/AndroidManifest.xml; then
-              sed -i 's/<\/application>/    <meta-data android:name="com.google.android.gms.ads.APPLICATION_ID" android:value="ca-app-pub-5825754850490611~6362976717" \/>\n    <\/application>/g' app/src/main/AndroidManifest.xml
-            fi
-            if ! grep -q "ZorenoBgNotifService" app/src/main/AndroidManifest.xml; then
-              sed -i 's/<\/application>/    <service android:name=".ZorenoBgNotifService" android:enabled="true" android:exported="false" android:stopWithTask="false" \/>\n    <receiver android:name=".ZorenoBootReceiver" android:enabled="true" android:exported="true"><intent-filter><action android:name="android.intent.action.BOOT_COMPLETED" \/><\/intent-filter><\/receiver>\n    <\/application>/g' app/src/main/AndroidManifest.xml
-            fi
-          fi
+          cp AndroidManifest.xml app/src/main/AndroidManifest.xml
 
           if [ -f "zoreno-release-key.jks" ]; then
-            cp zoreno-release-key.jks app/zoreno-release-key.jks
+            cp -f zoreno-release-key.jks app/zoreno-release-key.jks
+          elif [ -f "sign.jks" ]; then
+            cp -f sign.jks app/zoreno-release-key.jks
           else
             rm -f app/zoreno-release-key.jks
             keytool -genkeypair -v -keystore app/zoreno-release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias zoreno -storepass Zoreno@2026 -keypass Zoreno@2026 -dname "CN=Zoreno, OU=Mobile, O=Toko Platforms, L=Varanasi, S=UP, C=IN"
@@ -793,15 +429,16 @@ jobs:
           }
           EOF
 
-          gradle assembleDebug assembleRelease bundleRelease -x lint -x lintDebug
+          gradle assembleRelease bundleRelease -x lint -x lintDebug
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         if: success()
         with:
           name: zoreno-mobile-release-package
+          retention-days: 1
           path: |
-            app/build/outputs/apk/**/*.apk
-            app/build/outputs/bundle/**/*.aab
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/bundle/release/*.aab
             app/zoreno-release-key.jks
             keystore-details.txt
