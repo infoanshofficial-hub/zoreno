@@ -25,12 +25,13 @@ jobs:
           gradle-version: '8.9'
           cache-disabled: true
 
-      - name: Build Zoreno Production v1.0.9 (Code 10)
+      - name: Build Zoreno Production v1.1.0 (Code 11)
         run: |
           mkdir -p /tmp/zoreno_latest_backup
           [ -f "index.html" ] && cp -f index.html /tmp/zoreno_latest_backup/index.html || true
           [ -f "app.js" ] && cp -f app.js /tmp/zoreno_latest_backup/app.js || true
           [ -f "style.css" ] && cp -f style.css /tmp/zoreno_latest_backup/style.css || true
+          [ -f "splash.png" ] && cp -f splash.png /tmp/zoreno_latest_backup/splash.png || true
 
           rm -rf app build .gradle gradle libs.versions.toml
           for z in *.zip; do
@@ -40,6 +41,7 @@ jobs:
           [ -f "/tmp/zoreno_latest_backup/index.html" ] && cp -f /tmp/zoreno_latest_backup/index.html index.html || true
           [ -f "/tmp/zoreno_latest_backup/app.js" ] && cp -f /tmp/zoreno_latest_backup/app.js app.js || true
           [ -f "/tmp/zoreno_latest_backup/style.css" ] && cp -f /tmp/zoreno_latest_backup/style.css style.css || true
+          [ -f "/tmp/zoreno_latest_backup/splash.png" ] && cp -f /tmp/zoreno_latest_backup/splash.png splash.png || true
           rm -f *firebase-adminsdk*.json
 
           [ -f "index.html" ] && cp -f index.html index_912f1626.html || true
@@ -303,6 +305,34 @@ jobs:
                   private boolean zorenoTtsReady = false;
                   private android.media.MediaPlayer zorenoMediaPlayer;
                   private com.google.android.gms.ads.rewarded.RewardedAd zorenoRewardedAd;
+                  private com.google.android.gms.ads.interstitial.InterstitialAd zorenoInterstitialAd;
+                  private com.google.android.play.core.appupdate.AppUpdateManager zorenoAppUpdateManager;
+                  private void loadZorenoInterstitialAd() {
+                      runOnUiThread(() -> {
+                          try {
+                              com.google.android.gms.ads.AdRequest req = new com.google.android.gms.ads.AdRequest.Builder().build();
+                              com.google.android.gms.ads.interstitial.InterstitialAd.load(MainActivity.this, "ca-app-pub-5825754850490611/8668190362", req, new com.google.android.gms.ads.interstitial.InterstitialAdLoadCallback() {
+                                  @Override public void onAdLoaded(com.google.android.gms.ads.interstitial.InterstitialAd ad) { zorenoInterstitialAd = ad; }
+                                  @Override public void onAdFailedToLoad(com.google.android.gms.ads.LoadAdError err) { zorenoInterstitialAd = null; }
+                              });
+                          } catch (Exception ignored) {}
+                      });
+                  }
+                  private void checkAndStartPlayImmediateUpdate() {
+                      try {
+                          if (zorenoAppUpdateManager == null) {
+                              zorenoAppUpdateManager = com.google.android.play.core.appupdate.AppUpdateManagerFactory.create(this);
+                          }
+                          zorenoAppUpdateManager.getAppUpdateInfo().addOnSuccessListener(info -> {
+                              if (info.updateAvailability() == com.google.android.play.core.install.model.UpdateAvailability.UPDATE_AVAILABLE
+                                  && info.isUpdateTypeAllowed(com.google.android.play.core.install.model.AppUpdateType.IMMEDIATE)) {
+                                  try {
+                                      zorenoAppUpdateManager.startUpdateFlowForResult(info, com.google.android.play.core.install.model.AppUpdateType.IMMEDIATE, MainActivity.this, 9911);
+                                  } catch (Exception ignored) {}
+                              }
+                          });
+                      } catch (Exception ignored) {}
+                  }
                   private boolean isInstalledFromPlayStore() {
                       try {
                           String installer = (android.os.Build.VERSION.SDK_INT >= 30)
@@ -339,13 +369,15 @@ jobs:
                   inset_code = """
                   setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
                   androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-                  getWindow().getDecorView().setBackgroundColor(android.graphics.Color.BLACK);
+                  getWindow().getDecorView().setBackgroundColor(android.graphics.Color.parseColor("#F5F0FF"));
                   getWindow().setStatusBarColor(android.graphics.Color.BLACK);
                   getWindow().setNavigationBarColor(android.graphics.Color.BLACK);
                   if (android.os.Build.VERSION.SDK_INT >= 33) { requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 101); }
                   try {
                       com.google.android.gms.ads.MobileAds.initialize(this, status -> {
                           loadZorenoRewardedAd("ca-app-pub-5825754850490611/4904670790");
+                          loadZorenoInterstitialAd();
+                          checkAndStartPlayImmediateUpdate();
                       });
                   } catch (Exception e) {}
                   try { startService(new android.content.Intent(this, ZorenoBgNotifService.class)); } catch (Exception e) {}
@@ -408,7 +440,7 @@ jobs:
                       public void startGoogleLogin() {
                           runOnUiThread(() -> {
                               try {
-                                  com.google.android.gms.auth.api.signin.GoogleSignInOptions gso = new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN).requestEmail().requestProfile().build();
+                                  com.google.android.gms.auth.api.signin.GoogleSignInOptions gso = new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN).requestIdToken("205788450312-ljp89u7m3q7ptpsad8r2vaga3t3bidj6.apps.googleusercontent.com").requestEmail().requestProfile().build();
                                   com.google.android.gms.auth.api.signin.GoogleSignInClient client = com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(MainActivity.this, gso);
                                   client.signOut().addOnCompleteListener(t -> zorenoGoogleLauncher.launch(client.getSignInIntent()));
                               } catch (Exception e) {}
@@ -428,6 +460,18 @@ jobs:
                               } else {
                                   loadZorenoRewardedAd(unitId);
                                   if (webView != null) webView.evaluateJavascript("if(window.onAdMobRewardGranted){window.onAdMobRewardGranted();}", null);
+                              }
+                          });
+                      }
+                      @android.webkit.JavascriptInterface
+                      public void showInterstitialAd() {
+                          runOnUiThread(() -> {
+                              if (zorenoInterstitialAd != null) {
+                                  zorenoInterstitialAd.show(MainActivity.this);
+                                  zorenoInterstitialAd = null;
+                                  loadZorenoInterstitialAd();
+                              } else {
+                                  loadZorenoInterstitialAd();
                               }
                           });
                       }
@@ -507,12 +551,68 @@ jobs:
 
                   webView.addJavascriptInterface(new Object() {
                       @android.webkit.JavascriptInterface
+                      public void checkForImmediateUpdate() { runOnUiThread(() -> checkAndStartPlayImmediateUpdate()); }
+                      @android.webkit.JavascriptInterface
+                      public void startImmediateUpdate() { runOnUiThread(() -> checkAndStartPlayImmediateUpdate()); }
+                  }, "AndroidAppUpdate");
+
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
+                      public void saveBase64File(String dataUrl, String fileName, String mimeType) {
+                          new Thread(() -> {
+                              try {
+                                  String b64 = dataUrl.contains(",") ? dataUrl.split(",")[1] : dataUrl;
+                                  byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                                  java.io.File outDir = android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS);
+                                  if (!outDir.exists()) outDir.mkdirs();
+                                  String safeName = (fileName != null && !fileName.isEmpty()) ? fileName : ("Zoreno_" + System.currentTimeMillis() + ".pdf");
+                                  java.io.File outFile = new java.io.File(outDir, safeName);
+                                  if (outFile.exists()) {
+                                      int dot = safeName.lastIndexOf('.');
+                                      String base = dot > 0 ? safeName.substring(0, dot) : safeName;
+                                      String ext = dot > 0 ? safeName.substring(dot) : "";
+                                      outFile = new java.io.File(outDir, base + "_" + (System.currentTimeMillis() % 10000) + ext);
+                                  }
+                                  try (java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile)) {
+                                      fos.write(bytes);
+                                  }
+                              } catch (Exception ignored) {}
+                          }).start();
+                      }
+                      @android.webkit.JavascriptInterface
+                      public void downloadImage(String dataUrl, String fileName) {
+                          saveBase64File(dataUrl, fileName, "image/jpeg");
+                      }
+                  }, "AndroidDownloader");
+
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
                       public void shareText(String text) {
                           try {
                               android.content.Intent sendIntent = new android.content.Intent(android.content.Intent.ACTION_SEND);
                               sendIntent.setType("text/plain"); sendIntent.putExtra(android.content.Intent.EXTRA_TEXT, text);
                               startActivity(android.content.Intent.createChooser(sendIntent, "Share Zoreno Answer"));
                           } catch (Exception e) {}
+                      }
+                      @android.webkit.JavascriptInterface
+                      public void shareBase64File(String dataUrl, String fileName, String mimeType) {
+                          new Thread(() -> {
+                              try {
+                                  String b64 = dataUrl.contains(",") ? dataUrl.split(",")[1] : dataUrl;
+                                  byte[] bytes = android.util.Base64.decode(b64, android.util.Base64.DEFAULT);
+                                  String safeName = (fileName != null && !fileName.isEmpty()) ? fileName : ("Zoreno_File_" + System.currentTimeMillis() + ".pdf");
+                                  java.io.File outFile = new java.io.File(getCacheDir(), safeName);
+                                  try (java.io.FileOutputStream fos = new java.io.FileOutputStream(outFile)) {
+                                      fos.write(bytes);
+                                  }
+                                  android.net.Uri uri = androidx.core.content.FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", outFile);
+                                  android.content.Intent shareIntent = new android.content.Intent(android.content.Intent.ACTION_SEND);
+                                  shareIntent.setType(mimeType != null && !mimeType.isEmpty() ? mimeType : "application/pdf");
+                                  shareIntent.putExtra(android.content.Intent.EXTRA_STREAM, uri);
+                                  shareIntent.addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                                  runOnUiThread(() -> startActivity(android.content.Intent.createChooser(shareIntent, "Share File")));
+                              } catch (Exception ignored) {}
+                          }).start();
                       }
                   }, "AndroidShare");
 
@@ -542,6 +642,14 @@ jobs:
           PYEOF
 
           rm -f app/src/main/res/values/styles.xml
+          cat << 'EOF' > app/src/main/res/drawable/transparent_splash_icon.xml
+          <?xml version="1.0" encoding="utf-8"?>
+          <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+              <solid android:color="@android:color/transparent" />
+              <size android:width="1dp" android:height="1dp" />
+          </shape>
+          EOF
+
           cat << 'EOF' > app/src/main/res/values/themes.xml
           <resources xmlns:tools="http://schemas.android.com/tools">
               <style name="Theme.Zoreno" parent="Theme.MaterialComponents.DayNight.NoActionBar">
@@ -550,9 +658,9 @@ jobs:
                   <item name="android:windowLightStatusBar">false</item>
                   <item name="android:windowFullscreen">false</item>
                   <item name="android:fitsSystemWindows">true</item>
-                  <item name="android:windowBackground">#000000</item>
-                  <item name="android:windowSplashScreenBackground" tools:targetApi="31">#000000</item>
-                  <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@mipmap/ic_launcher</item>
+                  <item name="android:windowBackground">@drawable/splash</item>
+                  <item name="android:windowSplashScreenBackground" tools:targetApi="31">#F5F0FF</item>
+                  <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/transparent_splash_icon</item>
               </style>
           </resources>
           EOF
@@ -642,8 +750,8 @@ jobs:
                   applicationId = "$APP_ID"
                   minSdk = 24
                   targetSdk = 36
-                  versionCode = 10
-                  versionName = "1.0.9"
+                  versionCode = 11
+                  versionName = "1.1.0"
               }
               signingConfigs {
                   create("release") {
@@ -679,6 +787,7 @@ jobs:
               implementation("com.google.android.gms:play-services-auth:21.2.0")
               implementation("com.google.firebase:firebase-messaging:24.1.0")
               implementation("com.android.billingclient:billing:8.0.0")
+              implementation("com.google.android.play:app-update:2.1.0")
               implementation("com.google.code.gson:gson:2.11.0")
               implementation("androidx.browser:browser:1.8.0")
           }
