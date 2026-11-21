@@ -61,6 +61,7 @@ jobs:
           mkdir -p "app/src/main/java/$PKG_DIR" app/src/main/assets app/src/main/res/layout app/src/main/res/values app/src/main/res/values-night app/src/main/res/values-v31 app/src/main/res/xml app/src/main/res/drawable app/src/main/res/mipmap-anydpi-v26 app/src/main/res/mipmap-mdpi app/src/main/res/mipmap-hdpi app/src/main/res/mipmap-xhdpi app/src/main/res/mipmap-xxhdpi app/src/main/res/mipmap-xxxhdpi
 
           cp *.java "app/src/main/java/$PKG_DIR/" 2>/dev/null || true
+          [ -f "google-services.json" ] && cp -f google-services.json app/google-services.json || true
           cp *.html *.css *.js metadata.json *.png *.mp3 app/src/main/assets/ 2>/dev/null || true
           if [ -d "sounds" ]; then
             cp -r sounds app/src/main/assets/ || true
@@ -304,22 +305,30 @@ jobs:
           banner_id = os.environ.get("ADMOB_BANNER_ID", "ca-app-pub-5825754850490611/8792568001")
           rewarded_id = os.environ.get("ADMOB_REWARDED_ID", "ca-app-pub-5825754850490611/4904670790")
 
-          # --- A. AUTO-INJECT V101 CSS (ZERO PRO FLASH + CLEAN BANNER BOX) ---
-          v101_css = r"""
-          /* ZV101_BANNER_LOCK */
+          # --- A. CLEAN RECTANGULAR CONTAINER CSS (NO GLASS BLUR BEHIND AD) ---
+          v103_css = r"""
+          /* ZV103_RECT_BANNER_CONTAINER */
           #zorenoAdmobBannerContainer {
               display: none !important;
           }
-          body.zv101-show-free-banner #zorenoAdmobBannerContainer {
+          body.zv103-home-free-banner #zorenoAdmobBannerContainer {
               display: flex !important;
-              min-height: 62px !important;
-              height: 62px !important;
-              border-radius: 18px !important;
+              align-items: center !important;
+              justify-content: center !important;
+              min-height: 54px !important;
+              height: 54px !important;
+              border-radius: 4px !important;
+              background: transparent !important;
+              backdrop-filter: none !important;
+              -webkit-backdrop-filter: none !important;
+              box-shadow: none !important;
+              border: 1px solid rgba(148, 163, 184, 0.35) !important;
               overflow: hidden !important;
               padding: 0 !important;
           }
-          body.zv101-ad-loaded #zorenoAdmobBannerContainer .zv89-ad-mount-hint,
-          body.zv101-ad-loaded #zorenoAdmobBannerContainer .zv89-ad-badge-mini {
+          body.zv103-ad-loaded #zorenoAdmobBannerContainer .zv89-ad-mount-hint,
+          body.zv103-ad-loaded #zorenoAdmobBannerContainer .zv89-ad-badge-mini {
+              display: none !important;
               opacity: 0 !important;
               visibility: hidden !important;
           }
@@ -327,64 +336,57 @@ jobs:
           for css_file in glob.glob("app/src/main/assets/style*.css"):
               with open(css_file, "r", encoding="utf-8", errors="ignore") as f:
                   csscode = f.read()
-              if "ZV101_BANNER_LOCK" not in csscode:
-                  csscode = csscode + "\n" + v101_css
+              if "ZV103_RECT_BANNER_CONTAINER" not in csscode:
+                  csscode = csscode + "\n" + v103_css
                   with open(css_file, "w", encoding="utf-8") as f:
                       f.write(csscode)
 
-          # --- B. AUTO-INJECT V101 JS (STRICT HOME-ONLY BANNER + MAPS LINK FIX + GOOGLE LOGIN) ---
-          v101_js = r"""
-          // ZV101_AUTO_PATCH
-          (function initZorenoV101FinalFixes() {
-              let v101TierConfirmed = false;
+          # --- B. STRICT CHATS-ONLY BANNER + TOOL EXPORT DOWNLOAD FIX + HIDE GOOGLE BTN ---
+          v103_js = r"""
+          // ZV103_AUTO_PATCH
+          (function initZorenoV103Fixes() {
+              let v103TierConfirmed = false;
 
-              function isElVisible(el) {
+              function isReallyVisible(el) {
                   if (!el) return false;
                   const st = window.getComputedStyle(el);
                   if (st.display === "none" || st.visibility === "hidden" || parseFloat(st.opacity || "1") < 0.05) return false;
                   const r = el.getBoundingClientRect();
-                  return r.width > 10 && r.height > 10;
+                  return r.width > 20 && r.height > 20;
               }
 
-              function isAnyOtherScreenOpen() {
-                  const blockers = [
-                      "#activeChatScreen", "#aiChatScreen", "#toolsScreen", "#subScreen",
-                      "#settingsScreen", "#profileScreen", "#friendProfileScreen", "#authScreen",
-                      "#zorenoAccountCenterScreen", "#zorenoV80MyProfileView", "#zorenoV76Profile",
-                      "#zorenoToolPreviewModal", "#zorenoToolExportAdModal", "#forgotPassModal"
+              function isAnySubScreenOpen() {
+                  const subIds = [
+                      "activeChatScreen", "aiChatScreen", "toolsScreen", "subScreen",
+                      "settingsScreen", "profileScreen", "friendProfileScreen", "authScreen",
+                      "zorenoAccountCenterScreen", "zorenoV80MyProfileView", "zorenoV76Profile",
+                      "zorenoToolPreviewModal", "zorenoToolExportAdModal", "forgotPassModal"
                   ];
-                  for (const sel of blockers) {
-                      if (isElVisible(document.querySelector(sel))) return true;
+                  for (const id of subIds) {
+                      if (isReallyVisible(document.getElementById(id))) return true;
                   }
-                  const modals = document.querySelectorAll(".custom-modal-overlay");
-                  for (const m of modals) {
-                      if (isElVisible(m)) return true;
+                  const overlays = document.querySelectorAll(".custom-modal-overlay");
+                  for (const ov of overlays) {
+                      if (isReallyVisible(ov)) return true;
                   }
                   return false;
               }
 
-              function syncV101BannerVisibility() {
+              function syncV103Banner() {
                   const tier = typeof window.getEffectiveTier === "function" ? window.getEffectiveTier() : 0;
                   const home = document.getElementById("chatListScreen");
                   const box = document.getElementById("zorenoAdmobBannerContainer");
-                  const homeVis = isElVisible(home);
-                  const blocked = isAnyOtherScreenOpen() || document.body.classList.contains("keyboard-open");
+                  const onChatsTab = isReallyVisible(home) && !isAnySubScreenOpen() && !document.body.classList.contains("keyboard-open");
 
-                  if (!v101TierConfirmed || tier > 0) {
-                      document.body.classList.remove("zv101-show-free-banner");
+                  if (!v103TierConfirmed || tier > 0 || !onChatsTab || !box) {
+                      document.body.classList.remove("zv103-home-free-banner");
                       window.AndroidAdMob?.hideHomeBannerAd?.();
                       return;
                   }
 
-                  document.body.classList.add("zv101-show-free-banner");
-
-                  if (!homeVis || blocked || !box) {
-                      window.AndroidAdMob?.hideHomeBannerAd?.();
-                      return;
-                  }
-
+                  document.body.classList.add("zv103-home-free-banner");
                   const r = box.getBoundingClientRect();
-                  if (r.width > 120 && r.height > 40 && r.top >= 20 && r.bottom <= window.innerHeight - 60) {
+                  if (r.width > 120 && r.height > 36 && r.top >= 16 && r.bottom <= window.innerHeight - 60) {
                       window.AndroidAdMob?.positionHomeBannerAd?.(
                           Math.round(r.top),
                           Math.round(r.left),
@@ -396,38 +398,83 @@ jobs:
                   }
               }
 
-              window.zorenoSyncBannerNow = syncV101BannerVisibility;
+              window.zorenoSyncBannerNow = syncV103Banner;
 
-              // Confirm Free/Pro from Firestore before ever showing banner
+              // Immediately hide banner on any tap/navigation before screen transition settles
+              document.addEventListener("pointerdown", () => {
+                  window.AndroidAdMob?.hideHomeBannerAd?.();
+                  setTimeout(syncV103Banner, 120);
+                  setTimeout(syncV103Banner, 350);
+              }, true);
+
+              setInterval(syncV103Banner, 250);
+
               const waitAuth = setInterval(() => {
                   if (typeof auth !== "undefined" && auth && typeof db !== "undefined" && db) {
                       clearInterval(waitAuth);
                       auth.onAuthStateChanged(u => {
                           if (!u?.uid) {
-                              v101TierConfirmed = false;
-                              syncV101BannerVisibility();
+                              v103TierConfirmed = false;
+                              syncV103Banner();
                               return;
                           }
                           if (!navigator.onLine) {
-                              v101TierConfirmed = true;
-                              syncV101BannerVisibility();
+                              v103TierConfirmed = true;
+                              syncV103Banner();
                               return;
                           }
                           db.collection("users").doc(u.uid).onSnapshot(() => {
-                              v101TierConfirmed = true;
-                              syncV101BannerVisibility();
+                              v103TierConfirmed = true;
+                              syncV103Banner();
                           }, () => {
-                              v101TierConfirmed = true;
-                              syncV101BannerVisibility();
+                              v103TierConfirmed = true;
+                              syncV103Banner();
                           });
                       });
                   }
               }, 300);
 
-              setInterval(syncV101BannerVisibility, 300);
-              window.addEventListener("click", () => setTimeout(syncV101BannerVisibility, 80), true);
+              // FIX TOOL EXPORT REWARD DOWNLOAD + PREVENT FAKE "+3 CHAT" MESSAGE IN TOOLS
+              window._zv103ToolExportContext = false;
+              document.addEventListener("click", (e) => {
+                  if (e.target?.closest?.("#ztWatchExportAdBtn")) {
+                      window._zv103ToolExportContext = true;
+                  } else if (e.target?.closest?.("[id*='ai'], [class*='ai-'], [id*='quota'], [id*='unlock']")) {
+                      window._zv103ToolExportContext = false;
+                  }
+              }, true);
 
-              // EXTERNAL GOOGLE MAPS / LOCATION LINK FIX (Never opens broken intent:// inside WebView!)
+              const _origRewardGranted = window.onAdMobRewardGranted;
+              window.onAdMobRewardGranted = function () {
+                  const modal = document.getElementById("zorenoToolExportAdModal");
+                  if (modal) modal.style.display = "none";
+                  const exportBtn = document.getElementById("ztWatchExportAdBtn");
+                  if (exportBtn) {
+                      exportBtn.disabled = false;
+                      exportBtn.innerHTML = `<i class="fa-solid fa-circle-play"></i> <span>Watch Ad to Export</span>`;
+                  }
+                  if (typeof _origRewardGranted === "function") {
+                      try { _origRewardGranted.apply(this, arguments); } catch (e) {}
+                  }
+                  if (window._zv103ToolExportContext) {
+                      window._zv103ToolExportContext = false;
+                      setTimeout(() => {
+                          const dlBtn = document.querySelector("#ztoolDynamicWorkspace [id*='download' i], #ztoolDynamicWorkspace [id*='export' i], #ztoolDynamicWorkspace [id*='save' i], #ztoolDynamicWorkspace button[onclick*='download' i], #ztoolDynamicWorkspace button[onclick*='save' i], #ztoolDynamicWorkspace button[onclick*='export' i]");
+                          if (dlBtn && !dlBtn.disabled) dlBtn.click();
+                      }, 180);
+                  }
+              };
+
+              const _origToast = window.showCompactGlassToast;
+              if (typeof _origToast === "function") {
+                  window.showCompactGlassToast = function (title, msg) {
+                      const toolsOpen = isReallyVisible(document.getElementById("toolsScreen"));
+                      if (toolsOpen && /\+\s*3\s*chat/i.test(String(msg || ""))) return;
+                      return _origToast.apply(this, arguments);
+                  };
+              }
+
+              // EXTERNAL MAPS LINK FIX
               const isExternalMapOrAppUrl = (u) => typeof u === "string" && /google\.com\/maps|maps\.app\.goo\.gl|maps\.google\.|^geo:|^intent:/i.test(u);
               const _origOpen = window.open;
               window.open = function (url, target, feats) {
@@ -446,53 +493,28 @@ jobs:
                   }
               }, true);
 
-              // REAL GOOGLE SIGN-IN HANDLER (idToken -> Firebase Auth)
-              window.onZorenoNativeGoogleLogin = async function (email, displayName, idToken) {
-                  try {
-                      if (!idToken || !idToken.trim()) {
-                          showCompactGlassToast?.("", "Add SHA-1 in Firebase Console for Google Login");
-                          return;
-                      }
-                      if (typeof firebase === "undefined" || typeof auth === "undefined" || !auth) {
-                          showCompactGlassToast?.("", "Loading auth, please tap again");
-                          return;
-                      }
-                      showCompactGlassToast?.("", "Signing in with Google...");
-                      const cred = firebase.auth.GoogleAuthProvider.credential(idToken.trim());
-                      const res = await auth.signInWithCredential(cred);
-                      const u = res?.user;
-                      if (!u?.uid) throw new Error("No user returned");
-
-                      const uEmail = (u.email || email || "").trim();
-                      const uName = (u.displayName || displayName || uEmail.split("@")[0] || "Zoreno User").trim();
-
-                      if (typeof db !== "undefined" && db) {
-                          const ref = db.collection("users").doc(u.uid);
-                          const snap = await ref.get();
-                          if (!snap.exists) {
-                              const baseUname = (uName.toLowerCase().replace(/[^a-z0-9]/g, "") || "user") + "_" + Math.floor(1000 + Math.random() * 9000);
-                              await ref.set({
-                                  uid: u.uid, name: uName, email: uEmail, username: baseUname,
-                                  avatar: u.photoURL || "", userTier: 0,
-                                  createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-                                  lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                              }, { merge: true });
+              // HIDE "CONTINUE WITH GOOGLE" BUTTON CLEANLY
+              function hideGoogleBtns() {
+                  const nodes = document.querySelectorAll("button, a, div, span");
+                  for (const el of nodes) {
+                      const txt = (el.textContent || "").trim().toLowerCase();
+                      if (txt === "continue with google" || txt === "sign in with google") {
+                          const target = el.closest("button") || el;
+                          target.style.setProperty("display", "none", "important");
+                          const prev = target.previousElementSibling;
+                          if (prev && (prev.textContent || "").trim().toLowerCase() === "or") {
+                              prev.style.setProperty("display", "none", "important");
                           }
                       }
-
-                      localStorage.setItem("isLoggedIn", "true");
-                      localStorage.setItem("userEmail", uEmail);
-                      localStorage.setItem("userName", uName);
-                      window.AndroidPrefs?.setString?.("zorenoActiveUid", u.uid);
-
-                      const authScr = document.getElementById("authScreen");
-                      if (authScr) authScr.style.setProperty("display", "none", "important");
-                      if (typeof showChatsHome === "function") showChatsHome();
-                      showCompactGlassToast?.("", "Signed in as " + uName);
-                  } catch (err) {
-                      showCompactGlassToast?.("", "Google Login Error: " + (err?.code || err?.message || "Failed"));
                   }
-              };
+              }
+              window.addEventListener("DOMContentLoaded", hideGoogleBtns);
+              setTimeout(hideGoogleBtns, 400);
+              setTimeout(hideGoogleBtns, 1500);
+              new MutationObserver(hideGoogleBtns).observe(document.body || document.documentElement, {
+                  childList: true,
+                  subtree: true
+              });
           })();
           """
 
@@ -505,8 +527,8 @@ jobs:
                   lambda m: f'let GEMINI_API_KEY = {split_key_expr};',
                   jscode
               )
-              if "ZV101_AUTO_PATCH" not in jscode:
-                  jscode = jscode + "\n" + v101_js
+              if "ZV103_AUTO_PATCH" not in jscode:
+                  jscode = jscode + "\n" + v103_js
               with open(js_file, "w", encoding="utf-8") as f:
                   f.write(jscode)
 
@@ -518,7 +540,6 @@ jobs:
               code = re.sub(r'\bproductDetailsList\.isEmpty\s*\(\s*\)', 'productDetailsList.getProductDetailsList().isEmpty()', code)
               code = re.sub(r'\bproductDetailsList\.get\s*\(\s*0\s*\)', 'productDetailsList.getProductDetailsList().get(0)', code)
 
-              # Patch any existing shouldOverrideUrlLoading to open Google Maps / intent:// cleanly in external app
               def patch_override(m):
                   sig, var_name = m.group(1), m.group(2)
                   get_u = f"{var_name}.getUrl().toString()" if "WebResourceRequest" in sig else var_name
@@ -642,14 +663,11 @@ jobs:
                           zorenoBannerHost.setElevation(120f);
                           zorenoBannerHost.setClipChildren(true);
                           zorenoBannerHost.setClipToPadding(true);
-                          if (android.os.Build.VERSION.SDK_INT >= 21) {
-                              zorenoBannerHost.setClipToOutline(true);
-                              zorenoBannerHost.setOutlineProvider(new android.view.ViewOutlineProvider() {
-                                  @Override public void getOutline(android.view.View view, android.graphics.Outline outline) {
-                                      outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), 18f * d);
-                                  }
-                              });
-                          }
+                          android.graphics.drawable.GradientDrawable borderBg = new android.graphics.drawable.GradientDrawable();
+                          borderBg.setColor(android.graphics.Color.TRANSPARENT);
+                          borderBg.setCornerRadius(4f * d);
+                          borderBg.setStroke(Math.max(1, Math.round(1f * d)), android.graphics.Color.parseColor("#5994A3B8"));
+                          zorenoBannerHost.setBackground(borderBg);
 
                           zorenoHomeBannerAd = new com.google.android.gms.ads.AdView(MainActivity.this);
                           zorenoHomeBannerAd.setAdUnitId("__BANNER_ID__");
@@ -660,7 +678,7 @@ jobs:
                                   zorenoBannerRetryCount = 0;
                                   runOnUiThread(() -> {
                                       if (webView != null) {
-                                          webView.evaluateJavascript("document.body.classList.add('zv101-ad-loaded');if(window.zorenoSyncBannerNow)window.zorenoSyncBannerNow();", null);
+                                          webView.evaluateJavascript("document.body.classList.add('zv103-ad-loaded');if(window.zorenoSyncBannerNow)window.zorenoSyncBannerNow();", null);
                                       }
                                   });
                               }
@@ -688,7 +706,7 @@ jobs:
 
                           android.widget.FrameLayout.LayoutParams hostLp = new android.widget.FrameLayout.LayoutParams(
                               Math.round(320 * d),
-                              Math.round(62 * d)
+                              Math.round(54 * d)
                           );
                           hostLp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
                           ((android.widget.FrameLayout) root).addView(zorenoBannerHost, hostLp);
@@ -773,6 +791,7 @@ jobs:
 
                   getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
                       @Override public void handleOnBackPressed() {
+                          if (zorenoBannerHost != null) zorenoBannerHost.setVisibility(android.view.View.GONE);
                           if (webView != null) {
                               webView.evaluateJavascript("(window.handleZorenoHardwareBack && window.handleZorenoHardwareBack()) ? 'HANDLED' : 'EXIT'", res -> {
                                   if (res == null || !res.contains("HANDLED")) {
@@ -833,11 +852,6 @@ jobs:
                                       webView.evaluateJavascript("if(window.onZorenoNativeGoogleLogin){window.onZorenoNativeGoogleLogin('" + sE + "','" + sN + "','" + sT + "');}", null);
                                   }
                               });
-                          }
-                      } catch (com.google.android.gms.common.api.ApiException ex) {
-                          int codeNum = ex.getStatusCode();
-                          if (codeNum != 12501) {
-                              runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "Google Sign-In Error " + codeNum + ": Add SHA-1 in Firebase Console", android.widget.Toast.LENGTH_LONG).show());
                           }
                       } catch (Exception ignored) {}
                   });
@@ -978,7 +992,7 @@ jobs:
                                       new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
                                           com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
                                       )
-                                      .requestIdToken("205788450312-ljp89u7m3q7ptpsad8r2vaga3t3bidj6.apps.googleusercontent.com")
+                                      .requestIdToken("315803761947-tmmgpr31drlu961n4pmo3h24c27alotv.apps.googleusercontent.com")
                                       .requestEmail()
                                       .requestProfile()
                                       .build();
@@ -997,7 +1011,7 @@ jobs:
                               if (zorenoRewardedAd != null) {
                                   zorenoRewardedAd.show(MainActivity.this, reward -> {
                                       if (webView != null) {
-                                          webView.evaluateJavascript("if(window.onZorenoRewardedAdEarned){window.onZorenoRewardedAdEarned();}else if(window.onAdMobRewardGranted){window.onAdMobRewardGranted();}", null);
+                                          webView.evaluateJavascript("if(window.onAdMobRewardGranted){window.onAdMobRewardGranted();}else if(window.onZorenoRewardedAdEarned){window.onZorenoRewardedAdEarned();}", null);
                                       }
                                       zorenoRewardedAd = null;
                                       loadZorenoRewardedAd(unitId);
