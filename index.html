@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="en">
+
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, interactive-widget=resizes-content">
+    <title>Zoreno - Intelligent Study & Chat Assistant</title>
+
+    <!-- Google AdSense Site Verification (Web + APK दोनों के लिए 100% सेफ़) -->
+    <meta name="google-adsense-account" content="ca-pub-5825754850490611">
+    <meta name="theme-color" content="#7c3aed">
+
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+    <!-- Google Identity Services -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <!-- Client-Side Image & PDF Processing Libraries (100% On-Device) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js" defer></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" defer></script>
+</head>
+
+  
+<body>
+
+  <!-- Offline Alert Banner -->
+  <div id="offlineBanner" class="offline-banner">
+      <i class="fa-solid fa-wifi"></i>
+      <span>No Internet Connection. Please check your network.</span>
+  </div>
+
+  <!-- WhatsApp-Style Incoming Message Banner -->
+  <div id="zorenoInAppNotifBanner" class="zoreno-inapp-notif-banner">
+      <img src="logo.png" class="znotif-app-icon" onerror="this.src='default_avatar.png'" alt="Zoreno">
+      <div class="znotif-center-body">
+          <div class="znotif-title-line">
+              <strong id="znotifSenderName">Friend</strong>
+              <span>now</span>
+          </div>
+          <p id="znotifMsgPreview">Sent you a message</p>
+      </div>
+      <img id="znotifSenderAvatar" src="default_avatar.png" onerror="this.src='logo.png'" class="znotif-user-dp" alt="User">
+  </div>
+
+  <div id="geminiAura" class="gemini-aura-glow"></div>
+
+  <!-- ================= SPLASH SCREEN ================= -->
+  <div id="splashScreen" class="splash-screen">
+      <img src="splash.png" alt="Zoreno" class="splash-image">
+  </div>
+
+  <!-- ================= CLEAN TOKO PLATFORMS AUTH OVERLAY ================= -->
+  <div id="authScreen" class="auth-overlay" style="display:none;">
+      <div class="auth-top-bar">
+          <div class="toko-auth-top-brand">
+              <svg class="toko-t-logo-svg" viewBox="0 0 64 64" width="32" height="32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                      <linearGradient id="tTopAuth" x1="0%" y1="0%" x2="100%" y2="0%">
+                          <stop offset="0%" stop-color="#00f2fe"/>
+                          <stop offset="50%" stop-color="#3b82f6"/>
+                          <stop offset="100%" stop-color="#a855f7"/>
+                      </linearGradient>
+                      <linearGradient id="tStemAuth" x1="0%" y1="0%" x2="0%" y2="100%">
+                          <stop offset="0%" stop-color="#2563eb"/>
+                          <stop offset="100%" stop-color="#7c3aed"/>
+                      </linearGradient>
+                  </defs>
+                  <rect x="8" y="10" width="48" height="14" rx="7" fill="url(#tTopAuth)"/>
+                  <rect x="24" y="18" width="16" height="36" rx="8" fill="url(#tStemAuth)"/>
+              </svg>
+              <div class="toko-brand-text-col">
+                  <strong>Toko Platforms</strong>
+                  <span>A Zoreno Product</span>
+              </div>
+          </div>
+          <div class="auth-top-spacer"></div>
+          <div class="auth-theme-pill" onclick="toggleDarkMode()">
+              <span class="theme-dot active" id="authThemeLight">☀️</span>
+              <span class="theme-dot" id="authThemeDark">🌙</span>
+          </div>
+      </div>
+
+      <div class="auth-card-wrap">
+          <!-- LOGIN VIEW -->
+          <div id="loginViewSection" class="auth-form-view">
+              <div class="auth-heading-group">
+                  <h2><span class="z-grad-word">Zoreno</span> Account</h2>
+                  <p>Log in to your Zoreno account</p>
+              </div>
+              <form onsubmit="handleEmailLogin(event)">
+                  <div class="auth-field">
+                      <span class="field-icon"><i class="fa-regular fa-envelope"></i></span>
+                      <input type="email" id="loginEmail" placeholder="Email address" required autocomplete="email">
+                  </div>
+                  <div class="auth-field">
+                      <span class="field-icon"><i class="fa-solid fa-lock"></i></span>
+                      <input type="password" id="loginPassword" placeholder="Password" required autocomplete="current-password">
+                      <button type="button" class="eye-toggle-btn" onclick="toggleInputPassword('loginPassword', this)">
+                          <i class="fa-regular fa-eye-slash"></i>
+                      </button>
+                  </div>
+                  <div class="forgot-link-box">
+                      <a href="javascript:void(0)" onclick="handleForgotPassword()">Forgot Password?</a>
+                  </div>
+                  <button type="submit" class="auth-gradient-btn" id="loginSubmitBtn">
+                      <span>Log In</span>
+                      <i class="fa-solid fa-arrow-right"></i>
+                  </button>
+              </form>
+
+              <div class="auth-divider-line"><span>OR</span></div>
+
+              <button type="button" class="google-auth-pill-btn" onclick="triggerGoogleSignIn()">
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G">
+                  <span>Continue with Google</span>
+              </button>
+
+              <div class="auth-switch-caption">
+                  Don’t have an account? <a href="javascript:void(0)" onclick="showSignUpForm()">Create Account</a>
+              </div>
+          </div>
+
+          <!-- SIGNUP VIEW -->
+          <div id="signUpViewSection" class="auth-form-view" style="display:none;">
+              <div class="auth-heading-group">
+                  <h2>Create <span class="z-grad-word">Zoreno</span> Account</h2>
+                  <p>Join Zoreno and unlock a smarter experience</p>
+              </div>
+              <form onsubmit="handleEmailSignUp(event)">
+                  <div class="auth-field">
+                      <span class="field-icon"><i class="fa-regular fa-user"></i></span>
+                      <input type="text" id="regName" placeholder="Full Name" required autocomplete="name">
+                  </div>
+                  <div class="auth-field">
+                      <span class="field-icon"><i class="fa-regular fa-envelope"></i></span>
+                      <input type="email" id="regEmail" placeholder="Email address" required autocomplete="email">
+                  </div>
+                  <div class="auth-field">
+                      <span class="field-icon"><i class="fa-solid fa-lock"></i></span>
+                      <input type="password" id="regPassword" placeholder="Password (min 6 chars)" required minlength="6" autocomplete="new-password">
+                      <button type="button" class="eye-toggle-btn" onclick="toggleInputPassword('regPassword', this)">
+                          <i class="fa-regular fa-eye-slash"></i>
+                      </button>
+                  </div>
+                  <button type="submit" class="auth-gradient-btn" id="signUpSubmitBtn">
+                      <span>Create Account</span>
+                      <i class="fa-solid fa-arrow-right"></i>
+                  </button>
+              </form>
+
+              <div class="auth-divider-line"><span>OR</span></div>
+
+              <button type="button" class="google-auth-pill-btn" onclick="triggerGoogleSignIn()">
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G">
+                  <span>Continue with Google</span>
+              </button>
+
+              <div class="auth-switch-caption">
+                  Already have an account? <a href="javascript:void(0)" onclick="showLoginForm()">Log In</a>
+              </div>
+          </div>
+
+          <div class="auth-legal-footer">
+              <a href="javascript:void(0)" onclick="openPolicyModal('terms')">Terms</a>
+              <span class="legal-pipe">|</span>
+              <a href="javascript:void(0)" onclick="openPolicyModal('privacy')">Privacy</a>
+              <span class="legal-pipe">|</span>
+              <a href="javascript:void(0)" onclick="openPolicyModal('refund')">Help</a>
+          </div>
+      </div>
+  </div>
+
+  <!-- =========================
+       1. HOME / CHAT LIST SCREEN
+  ========================== -->
+  <section class="chat-list-screen" id="chatListScreen" style="display:none;">
+      <div class="chat-list-header-modern">
+          <div class="top-search-field-pill">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="search" id="homeChatSearchInput" placeholder="Search chats, @username or people..." autocomplete="off">
+          </div>
+          <button type="button" class="top-compose-circle-btn" onclick="openProfile()" title="Profile">
+              <i class="fa-solid fa-pen-to-square"></i>
+          </button>
+      </div>
+
+            <!-- Focus Sprint Timer Card -->
+      <div class="focus-sprint-card">
+          <div class="sprint-header-row">
+              <div>
+                  <h3 class="sprint-title">Focus Sprint ⏱️</h3>
+                  <p class="sprint-subtitle">Stay focused & productive!</p>
+              </div>
+              <div class="sprint-timer-action-wrap">
+                  <div class="sprint-timer-display" id="sprintTimerText">20:00</div>
+                  <button type="button" class="sprint-reset-btn" onclick="resetSprintState()" title="Reset Timer">
+                      <i class="fa-solid fa-rotate-right"></i>
+                  </button>
+              </div>
+          </div>
+
+          <div class="sprint-control-pill-wrap" id="sprintControlPill">
+              <div class="sprint-presets-group" id="sprintPresetsGroup">
+                  <button type="button" class="preset-pill-btn" onclick="selectSprintPreset(5, this)">5m</button>
+                  <button type="button" class="preset-pill-btn" onclick="selectSprintPreset(10, this)">10m</button>
+                  <button type="button" class="preset-pill-btn" onclick="selectSprintPreset(15, this)">15m</button>
+                  <button type="button" class="preset-pill-btn active" onclick="selectSprintPreset(20, this)">20m</button>
+              </div>
+
+              <div class="sprint-mini-track" id="sprintTrack">
+                  <div class="sprint-progress-track-line">
+                      <div class="sprint-progress-fill-blue" id="sprintProgressFill"></div>
+                  </div>
+                  <div class="sprint-brown-rabbit" id="sprintRabbit">🐇</div>
+                  <div class="sprint-flag-icon">🏁</div>
+              </div>
+
+              <button type="button" class="sprint-go-gradient-btn" id="sprintPlayBtn" onclick="toggleSprintTimer()">
+                  <span id="sprintBtnLabel">Go</span>
+                  <i class="fa-solid fa-play" id="sprintPlayIcon"></i>
+              </button>
+          </div>
+      </div>
+
+                <!-- DUAL-MODE AD SLOT: AdSense on Web App | Native AdMob on Android APK -->
+      <div id="zorenoAdmobBannerContainer" class="zoreno-admob-banner-card" style="display:none;">
+          <span class="zv89-ad-badge-mini">Ad</span>
+          <div id="zorenoNativeBannerMount" style="width:100%; height:50px; display:flex; align-items:center; justify-content:center;"></div>
+      </div>
+
+
+
+
+      <!-- Chat Tabs -->
+      <div class="chat-tabs">
+          <button class="tab-btn active">All</button>
+          <button class="tab-btn">Unread</button>
+          <button class="tab-btn">Friends</button>
+          <button class="tab-btn">Groups</button>
+      </div>
+
+      <!-- Chats List -->
+      <div class="chats-container">
+          <!-- Pinned Zoreno AI Chat -->
+          <div class="chat-list-item pinned" onclick="openZorenoAIChat()" style="cursor: pointer;">
+              <div class="chat-avatar">
+                  <img src="logo.png" alt="Zoreno AI" class="bot-circle-avatar" onerror="this.src='default_avatar.png'">
+                  <div class="online-dot"></div>
+              </div>
+              <div class="chat-info">
+                  <div class="chat-name-row">
+                      <h4>Zoreno AI</h4>
+                      <span class="chat-time" id="zorenoLastChatTime">Online</span>
+                  </div>
+                  <div class="chat-msg-row">
+                      <p id="zorenoHomeLastPreview">Tap to start chatting with your AI partner</p>
+                      <i class="fa-solid fa-thumbtack pin-icon"></i>
+                  </div>
+              </div>
+          </div>
+      </div>
+  </section>
+
+  <!-- =========================
+       2. IN-APP LIVE SEARCH SCREEN
+  ========================== -->
+  <section class="web-search-screen" id="webSearchScreen" style="display: none;">
+      <div class="web-search-top-bar">
+          <button class="icon-round-btn" onclick="closeLiveGoogleSearch()">
+              <i class="fa-solid fa-arrow-left"></i>
+          </button>
+          <div class="brand-gradient-text search-header-brand">Zoreno</div>
+          <button class="icon-round-btn purple-btn" onclick="openProfile()">
+              <i class="fa-solid fa-pen-to-square"></i>
+          </button>
+      </div>
+
+      <div class="search-input-pill-wrap">
+          <i class="fa-solid fa-magnifying-glass search-inner-glass"></i>
+          <input type="text" id="liveGoogleInput" placeholder="Search live web..." onkeydown="handleLiveGoogleEnter(event)">
+          <button class="search-clear-btn" onclick="clearLiveSearch()"><i class="fa-solid fa-xmark"></i></button>
+          <button class="search-submit-purple-btn" onclick="runLiveGoogleSearch()">
+              <i class="fa-solid fa-magnifying-glass"></i>
+          </button>
+      </div>
+
+      <div class="search-results-scroll" id="liveSearchResultsArea">
+          <div class="empty-search-state" style="text-align:center; padding-top: 40px; color:#94a3b8;">
+              <i class="fa-solid fa-globe" style="font-size:36px; margin-bottom:10px;"></i>
+              <p>Type anything to search the live web</p>
+          </div>
+      </div>
+  </section>
+
+  <!-- =========================
+       3. ZORENO AI CHAT SCREEN
+  ========================== -->
+  <section class="chat-screen" id="chatScreen" style="display:none;">
+      <div class="ai-chat-topbar">
+          <button type="button" class="ai-topbar-btn" onclick="goHome()" aria-label="Back">
+              <i class="fa-solid fa-chevron-left"></i>
+          </button>
+          <div class="ai-topbar-user-meta" onclick="openZorenoAiProfileView()" style="cursor:pointer;">
+              <img src="logo.png" alt="Zoreno AI" class="ai-logo-avatar" onerror="this.src='default_avatar.png'">
+              <div style="min-width:0;">
+                  <div style="display:flex;align-items:center;gap:6px;">
+                      <span id="chatTitle" class="ai-topbar-title">Zoreno AI</span>
+                  </div>
+                  <div style="font-size:11px;color:#10b981;font-weight:700;">@zoreno_ai • Online</div>
+              </div>
+          </div>
+          <div class="ai-topbar-actions">
+              <div style="position: relative;">
+                  <button type="button" class="ai-topbar-btn" onclick="toggleAiHeaderMenu()" title="More">
+                      <i class="fa-solid fa-ellipsis-vertical"></i>
+                  </button>
+                  <div id="aiHeaderDropdownMenu" class="custom-dropdown-menu" style="display:none;">
+                      <button type="button" onclick="openZorenoUsageLimitModal()"><i class="fa-solid fa-bolt" style="color:#7c3aed;"></i> AI Daily Energy (%)</button>
+                      <button type="button" onclick="closeAllDropdownMenus(); openZorenoAiProfileView();"><i class="fa-solid fa-robot" style="color:#6366f1;"></i> AI Profile & Info</button>
+                      <button type="button" onclick="closeAllDropdownMenus(); copyLatestAiReplyQuick();"><i class="fa-regular fa-copy" style="color:#3b82f6;"></i> Copy Last Answer</button>
+                      <button type="button" onclick="closeAllDropdownMenus(); speakLatestAiReplyQuick();"><i class="fa-solid fa-volume-high" style="color:#8b5cf6;"></i> Read Aloud (Voice)</button>
+                      <button type="button" onclick="closeAllDropdownMenus(); shareLatestAiReplyQuick();"><i class="fa-solid fa-share-nodes" style="color:#10b981;"></i> Share Answer Card</button>
+                      <button type="button" onclick="clearCurrentAiChat()"><i class="fa-regular fa-trash-can" style="color:#ef4444;"></i> Clear AI Chat</button>
+                      <button type="button" onclick="openAiFeedbackModal()"><i class="fa-regular fa-comment-dots" style="color:#f59e0b;"></i> Send Feedback</button>
+                  </div>
+              </div>
+          </div>
+      </div>
+
+      <div class="chat-messages" id="chatMessages"></div>
+  </section>
+
+  <!-- =========================
+       4. SETTINGS SCREEN
+  ========================== -->
+  <section class="settings-screen" id="settingsScreen" style="display:none;">
+      <div class="page-header settings-page-header">
+          <button class="back-btn" onclick="goHome()" aria-label="Back">
+              <i class="fa-solid fa-arrow-left"></i>
+          </button>
+          <div class="page-header-content">
+              <h2 id="settingsHeaderTitle">Settings</h2>
+              <p id="settingsHeaderDesc">Customize your Zoreno experience</p>
+          </div>
+          <div class="page-header-icon">✨</div>
+      </div>
+
+      <!-- Manage Zoreno Account Card -->
+      <div class="settings-card" id="zorenoManageAccountSettingCard" style="margin-bottom:18px;">
+          <div class="setting-item" onclick="openZorenoAccountCenter()">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:linear-gradient(135deg,#06b6d4,#7c3aed); color:#ffffff;">
+                      <i class="fa-solid fa-user-shield"></i>
+                  </div>
+                  <div class="setting-text">
+                      <h4>Manage Zoreno Account</h4>
+                      <p>Account, password, security & privacy</p>
+                  </div>
+              </div>
+              <div class="setting-item-right"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+      </div>
+
+      <!-- Appearance -->
+      <h3 class="settings-section-title" id="appearanceTitle">APPEARANCE</h3>
+      <div class="settings-card">
+          <div class="setting-item" onclick="toggleDarkMode()">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:#3b82f6;color:#ffffff;">
+                      <i class="fa-solid fa-moon"></i>
+                  </div>
+                  <div class="setting-text">
+                      <h4 id="darkModeTitle">Dark Mode</h4>
+                      <p id="darkModeDesc">Switch theme</p>
+                  </div>
+              </div>
+              <div class="toggle-switch off" id="darkModeToggle"></div>
+          </div>
+
+          <div class="setting-item" onclick="toggleEyeProtectionMode()">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:#f59e0b;color:#ffffff;">
+                      <i class="fa-solid fa-eye-low-vision"></i>
+                  </div>
+                  <div class="setting-text">
+                      <h4>Ultra Eye Protection</h4>
+                      <p>Warm zero-strain reading colors</p>
+                  </div>
+              </div>
+              <div class="toggle-switch off" id="eyeCareToggle"></div>
+          </div>
+      </div>
+
+      <!-- Region & Language -->
+      <h3 class="settings-section-title" id="regionTitle">REGION & LANGUAGE</h3>
+      <div class="settings-card country-card">
+          <div class="setting-item country-setting-item" onclick="openWorldCountryModal()">
+              <div class="setting-item-left country-info">
+                  <div class="setting-icon" style="background:#8b5cf6;color:#ffffff;"><i class="fa-solid fa-globe"></i></div>
+                  <div class="setting-text">
+                      <h4 id="countryTitle">Country / Currency</h4>
+                      <p id="countryDesc">Select your region for pricing</p>
+                  </div>
+              </div>
+              <div class="country-select-wrap">
+                  <button type="button" class="cute-country-trigger" id="countryTriggerBtn">
+                      <span id="selectedCountryDisplay">🇮🇳 India (₹)</span>
+                      <i class="fa-solid fa-chevron-down"></i>
+                  </button>
+              </div>
+          </div>
+
+          <div class="setting-item" id="zorenoLangSettingItem" onclick="openWorldLanguageModal()">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:#ec4899; color:#ffffff;">
+                      <i class="fa-solid fa-language"></i>
+                  </div>
+                  <div class="setting-text">
+                      <h4 id="appLangSettingTitle">Language</h4>
+                      <p id="appLangSettingSub">🇮🇳 English (India)</p>
+                  </div>
+              </div>
+              <div class="setting-item-right"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+      </div>
+
+      <!-- Legal -->
+      <h3 class="settings-section-title" id="legalTitle">LEGAL & POLICIES</h3>
+      <div class="settings-card legal-card">
+          <div class="setting-item" onclick="openPolicyModal('terms')">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:#0ea5e9;color:#ffffff;"><i class="fa-solid fa-file-contract"></i></div>
+                  <div class="setting-text">
+                      <h4 id="termsTitle">Terms & Conditions</h4>
+                      <p id="termsDesc">Usage rules & service terms</p>
+                  </div>
+              </div>
+              <div class="setting-item-right"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+          <div class="setting-item" onclick="openPolicyModal('privacy')">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:#10b981;color:#ffffff;"><i class="fa-solid fa-shield-halved"></i></div>
+                  <div class="setting-text">
+                      <h4 id="privacyTitle">Privacy Policy</h4>
+                      <p id="privacyDesc">How we protect your data</p>
+                  </div>
+              </div>
+              <div class="setting-item-right"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+          <div class="setting-item" onclick="openPolicyModal('refund')">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:#f97316;color:#ffffff;"><i class="fa-solid fa-rotate-left"></i></div>
+                  <div class="setting-text">
+                      <h4 id="refundTitle">Refund & Cancellation</h4>
+                      <p id="refundDesc">Subscription refund rules</p>
+                  </div>
+              </div>
+              <div class="setting-item-right"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+      </div>
+
+      <!-- DATA & STORAGE SECTION -->
+      <h3 class="settings-section-title">DATA & STORAGE</h3>
+      <div class="settings-card data-card">
+          <div class="setting-item" id="zorenoUsageLimitSettingRow" onclick="openZorenoUsageLimitModal()">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:#6366f1; color:#ffffff;">
+                      <i class="fa-solid fa-bolt"></i>
+                  </div>
+                  <div class="setting-text">
+                      <h4>AI Daily Energy & Usage</h4>
+                      <p>Check available daily AI energy (%)</p>
+                  </div>
+              </div>
+              <div class="setting-item-right"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+
+          <div class="setting-item" onclick="clearAllChatHistory()">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:#ef4444;color:#ffffff;"><i class="fa-solid fa-trash-can"></i></div>
+                  <div class="setting-text">
+                      <h4 id="clearHistoryTitle">Clear AI Chat</h4>
+                      <p id="clearHistoryDesc">Delete saved AI conversation</p>
+                  </div>
+              </div>
+              <div class="setting-item-right"><i class="fa-solid fa-chevron-right"></i></div>
+          </div>
+
+          <div class="setting-item" onclick="handleUserLogout()" style="border-top: 1px solid rgba(239, 68, 68, 0.12);">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:#dc2626; color:#ffffff;"><i class="fa-solid fa-right-from-bracket"></i></div>
+                  <div class="setting-text">
+                      <h4 style="color: #ef4444;">Log Out</h4>
+                      <p>Sign out from your account</p>
+                  </div>
+              </div>
+              <div class="setting-item-right"><i class="fa-solid fa-chevron-right" style="color: #ef4444;"></i></div>
+          </div>
+
+          <div class="setting-item" onclick="openDeleteAccountModal()" style="border-top: 1px solid rgba(239, 68, 68, 0.12);">
+              <div class="setting-item-left">
+                  <div class="setting-icon" style="background:#991b1b; color:#ffffff;"><i class="fa-solid fa-user-xmark"></i></div>
+                  <div class="setting-text">
+                      <h4 style="color: #dc2626;">Delete Account</h4>
+                      <p>Permanently delete account & data</p>
+                  </div>
+              </div>
+              <div class="setting-item-right"><i class="fa-solid fa-chevron-right" style="color: #dc2626;"></i></div>
+          </div>
+      </div>
+
+      <div id="zorenoTokoFooterBrand" style="text-align:center; padding:20px 16px 35px; color:#64748b; font-size:12px; line-height:1.6;">
+          <div style="font-size:12.5px; font-weight:700; color:#64748b;">
+              Zoreno v1.1.0 • <a href="https://tokoplatforms.in" target="_blank" style="color:#64748b; text-decoration:none;">Toko Platforms</a>
+          </div>
+          <div style="margin-top:4px; font-size:11.5px;">
+              <a href="https://tokoplatforms.in/privacy-policy" target="_blank" style="color:#2563eb; text-decoration:none; font-weight:600;">Privacy Policy</a>
+              <span style="margin:0 6px; opacity:0.4;">•</span>
+              <a href="javascript:void(0)" onclick="openPolicyModal('terms')" style="color:#2563eb; text-decoration:none; font-weight:600;">Terms</a>
+          </div>
+      </div>
+  </section>
+
+  <!-- =========================
+       5. SUBSCRIPTION SCREEN (33693.png EXACT MATCH: PLANS + MY PLAN)
+  ========================== -->
+  <section class="sub-screen" id="subScreen" style="display:none;">
+      <div class="sub-glass-container">
+          <!-- Top Header -->
+          <div class="sub-top-bar">
+              <button type="button" class="liquid-back-btn" onclick="goHome()">
+                  <i class="fa-solid fa-arrow-left"></i>
+              </button>
+              <div class="sub-header-titles">
+                  <h2>Zoreno Plans</h2>
+                  <p id="subTopSubtitle">Manage your subscription and benefits</p>
+              </div>
+              <div class="sub-top-right-icons">
+                  <button type="button" class="sub-circle-icon-btn" onclick="openPolicyModal('refund')" title="Help">
+                      <i class="fa-regular fa-circle-question"></i>
+                  </button>
+                  <div class="liquid-crown-badge" title="Premium"><i class="fa-solid fa-crown"></i></div>
+              </div>
+          </div>
+
+          <!-- Segmented Toggle: Plans | My Plan -->
+          <div class="sub-segmented-tabs" id="subSegmentedTabs">
+              <button type="button" class="sub-seg-btn" id="subTabPlansBtn" onclick="switchSubPlanTab('plans')">Plans</button>
+              <button type="button" class="sub-seg-btn active" id="subTabMyPlanBtn" onclick="switchSubPlanTab('myplan')">My Plan</button>
+          </div>
+
+          <!-- VIEW A: MY ACTIVE PLAN DASHBOARD (33693.png MATCH) -->
+          <div id="myActivePlanView" style="display:none;">
+              <div class="myplan-hero-card">
+                  <div class="myplan-cosmic-banner">
+                      <div class="myplan-crown-ring">
+                          <i class="fa-solid fa-crown"></i>
+                      </div>
+                      <div class="myplan-banner-text">
+                          <div class="myplan-title-row">
+                              <h3 id="myPlanHeroName">Zoreno Pro</h3>
+                              <span class="myplan-active-pill"><i class="fa-solid fa-check"></i> Active</span>
+                          </div>
+                          <p id="myPlanHeroDesc">Your Pro plan is active and all features are unlocked.</p>
+                      </div>
+                  </div>
+
+                  <div class="myplan-body-sheet">
+                      <div class="myplan-stats-grid">
+                          <div class="myplan-stat-col">
+                              <i class="fa-regular fa-calendar-check"></i>
+                              <span>Plan</span>
+                              <strong id="myPlanStatTier">Pro</strong>
+                          </div>
+                          <div class="myplan-stat-col">
+                              <i class="fa-solid fa-cube"></i>
+                              <span>Billing</span>
+                              <strong id="myPlanStatPrice">₹349 / Month</strong>
+                          </div>
+                          <div class="myplan-stat-col">
+                              <i class="fa-regular fa-clock"></i>
+                              <span>Renews on</span>
+                              <strong id="myPlanStatRenewDate">Dec 02, 2026</strong>
+                          </div>
+                      </div>
+
+                      <div class="myplan-actions-row">
+                          <button type="button" class="myplan-manage-btn" onclick="switchSubPlanTab('plans')">
+                              <i class="fa-solid fa-gear"></i>
+                              <span>Manage Plan</span>
+                          </button>
+                          <button type="button" class="myplan-cancel-btn" onclick="openCancelSubscriptionModal()">
+                              <i class="fa-regular fa-circle-xmark"></i>
+                              <span>Cancel Plan</span>
+                          </button>
+                      </div>
+                  </div>
+              </div>
+
+              <!-- Unlocked Benefits Card -->
+              <div class="myplan-benefits-card">
+                  <div class="myplan-benefits-header">
+                      <div class="mp-ben-title">
+                          <i class="fa-solid fa-bolt"></i>
+                          <h4 id="myPlanBenefitsHeading">Your Pro Benefits</h4>
+                      </div>
+                      <span class="mp-unlocked-pill">All Unlocked <i class="fa-solid fa-check"></i></span>
+                  </div>
+
+                  <div class="myplan-benefits-list">
+                      <div class="mp-benefit-item" onclick="openZorenoUsageLimitModal()">
+                          <div class="mp-ben-left"><i class="fa-regular fa-comment-dots"></i><span>Higher AI message limits</span></div>
+                          <span class="mp-check-circle"><i class="fa-solid fa-check"></i></span>
+                      </div>
+                      <div class="mp-benefit-item">
+                          <div class="mp-ben-left"><i class="fa-solid fa-bolt"></i><span>Faster & priority AI response</span></div>
+                          <span class="mp-check-circle"><i class="fa-solid fa-check"></i></span>
+                      </div>
+                      <div class="mp-benefit-item">
+                          <div class="mp-ben-left"><i class="fa-solid fa-layer-group"></i><span>Access to premium AI models & Vision</span></div>
+                          <span class="mp-check-circle"><i class="fa-solid fa-check"></i></span>
+                      </div>
+                      <div class="mp-benefit-item">
+                          <div class="mp-ben-left"><i class="fa-solid fa-border-all"></i><span>Advanced chat & study productivity tools</span></div>
+                          <span class="mp-check-circle"><i class="fa-solid fa-check"></i></span>
+                      </div>
+                      <div class="mp-benefit-item">
+                          <div class="mp-ben-left"><i class="fa-solid fa-headset"></i><span>Priority support & ad-free experience</span></div>
+                          <span class="mp-check-circle"><i class="fa-solid fa-check"></i></span>
+                      </div>
+                  </div>
+              </div>
+
+              <!-- Explore Other Plans Bar -->
+              <div class="myplan-explore-bar" onclick="switchSubPlanTab('plans')">
+                  <div class="mp-exp-left">
+                      <i class="fa-solid fa-crown"></i>
+                      <span>Explore All Features & Plans</span>
+                  </div>
+                  <i class="fa-solid fa-chevron-right"></i>
+              </div>
+          </div>
+
+          <!-- VIEW B: PLANS SELECTION & FEATURE LIST -->
+          <div id="explorePlansView">
+              <div class="liquid-plan-card active" id="plusPlanCard" onclick="selectPlan(1, this)">
+                  <div class="radio-outer"><div class="radio-inner"></div></div>
+                  <div class="plan-details">
+                      <div class="plan-name-row">
+                          <h4 id="plan1Title">₹249 / Month (Plus)</h4>
+                          <span class="tag-popular">Popular</span>
+                      </div>
+                      <p id="plan1Description">Higher AI Limits • 30 Days Validity</p>
+                  </div>
+                  <input type="radio" name="plan" checked hidden>
+              </div>
+
+              <div class="liquid-plan-card" id="proPlanCard" onclick="selectPlan(2, this)" style="margin-top:12px;">
+                  <div class="radio-outer"><div class="radio-inner"></div></div>
+                  <div class="plan-details">
+                      <div class="plan-name-row">
+                          <h4 id="plan2Title">₹349 / Month (Pro)</h4>
+                      </div>
+                      <p id="plan2Description">Highest AI Limits • 30 Days • Vision</p>
+                  </div>
+                  <input type="radio" name="plan" hidden>
+              </div>
+
+              <button class="liquid-main-btn" id="payButtonText" onclick="triggerRazorpay()" style="margin-top:14px;">
+                  <span class="btn-text">Upgrade to Plus</span>
+                  <span class="btn-pill-arrow"><i class="fa-solid fa-arrow-right"></i></span>
+              </button>
+
+              <div class="sub-legal-note" style="margin-top:12px;">
+                  <p><i class="fa-solid fa-shield-check"></i> 30-Day Active Plan • Secured Payment</p>
+                  <span>Cancel anytime on Google Play Store subscriptions.</span>
+              </div>
+
+              <div id="zorenoTgPremListCard" class="tg-prem-list-card"></div>
+          </div>
+      </div>
+  </section>
+
+  <!-- =========================
+       6. TOOLS SCREEN (ALL 10 FOCUS MUSIC TRACKS RESTORED)
+  ========================== -->
+  <section class="tools-screen" id="toolsScreen" style="display:none;">
+      <div id="ztoolDynamicWorkspace" style="width:100%;"></div>
+      <div id="ztoolFocusMusicSubView" style="display:none; flex-direction:column; gap:12px; width:100%;">
+      <div class="music-top-bar">
+          <button type="button" class="music-circle-icon-btn" onclick="openZorenoToolView('hub')" title="Back">
+              <i class="fa-solid fa-chevron-left"></i>
+          </button>
+          <div class="music-top-center">
+              <h2 class="music-main-title">Focus Music</h2>
+              <p class="music-sub-title">Stay calm, stay focused.</p>
+          </div>
+          <button type="button" class="music-circle-icon-btn" title="Headphones">
+              <i class="fa-solid fa-headphones"></i>
+          </button>
+      </div>
+
+      <div class="music-hero-card">
+          <div class="music-hero-header">
+              <img src="https://images.unsplash.com/photo-1519692933481-e162a57d6721?w=300" id="currentTrackCover" alt="Cover" class="music-cover-art">
+              <div class="music-hero-details">
+                  <div class="music-title-fav-row">
+                      <h3 id="currentTrackTitle">Rain Storm</h3>
+                      <button type="button" class="music-heart-btn" onclick="toggleMusicLike(this)" title="Favorite">
+                          <i class="fa-regular fa-heart" id="musicHeartIcon"></i>
+                      </button>
+                  </div>
+                  <div class="music-waveform-bars" id="musicWaveVisualizer">
+                      <span></span><span></span><span></span><span></span><span></span>
+                      <span></span><span></span><span></span><span></span><span></span>
+                      <span></span><span></span><span></span><span></span><span></span>
+                      <span></span><span></span><span></span><span></span><span></span>
+                  </div>
+              </div>
+          </div>
+
+          <div class="music-progress-wrapper">
+              <div class="music-progress-rail" onclick="seekMusicByClick(event)">
+                  <div class="music-progress-bar-fill" id="musicProgressFill"></div>
+                  <div class="music-progress-thumb-knob" id="musicProgressKnob"></div>
+              </div>
+              <div class="music-time-display-row">
+                  <span id="musicTimeElapsed">00:00</span>
+                  <span id="musicTimeDuration">00:30</span>
+              </div>
+          </div>
+
+          <div class="music-controls-row">
+              <button type="button" class="music-ctrl-btn" onclick="playPreviousTrack()" title="Previous">
+                  <i class="fa-solid fa-backward-step"></i>
+              </button>
+              <button type="button" class="music-main-play-btn" id="musicMainPlayBtn" onclick="toggleFocusMusicPlay()" title="Play / Pause">
+                  <i class="fa-solid fa-play" id="musicPlayIcon"></i>
+              </button>
+              <button type="button" class="music-ctrl-btn" onclick="playNextTrack()" title="Next">
+                  <i class="fa-solid fa-forward-step"></i>
+              </button>
+          </div>
+      </div>
+
+      <div class="music-sound-grid">
+          <div class="sound-card-pill active" onclick="selectMusicTrack(0)" id="soundCard0">
+              <div class="sound-card-icon-box"><i class="fa-solid fa-cloud-showers-heavy"></i></div>
+              <div class="sound-card-title-box"><h4>Rain Storm</h4></div>
+              <div class="sound-card-action-box"><div class="mini-playing-waves"><span></span><span></span><span></span></div></div>
+          </div>
+          <div class="sound-card-pill" onclick="selectMusicTrack(1)" id="soundCard1">
+              <div class="sound-card-icon-box"><i class="fa-solid fa-music"></i></div>
+              <div class="sound-card-title-box"><h4>Deep Lo-Fi</h4></div>
+              <div class="sound-card-action-box"><i class="fa-solid fa-play"></i></div>
+          </div>
+          <div class="sound-card-pill" onclick="selectMusicTrack(2)" id="soundCard2">
+              <div class="sound-card-icon-box"><i class="fa-solid fa-dove"></i></div>
+              <div class="sound-card-title-box"><h4>Forest Birds</h4></div>
+              <div class="sound-card-action-box"><i class="fa-solid fa-play"></i></div>
+          </div>
+          <div class="sound-card-pill" onclick="selectMusicTrack(3)" id="soundCard3">
+              <div class="sound-card-icon-box"><i class="fa-solid fa-water"></i></div>
+              <div class="sound-card-title-box"><h4>Ocean Waves</h4></div>
+              <div class="sound-card-action-box"><i class="fa-solid fa-play"></i></div>
+          </div>
+          <div class="sound-card-pill" onclick="selectMusicTrack(4)" id="soundCard4">
+              <div class="sound-card-icon-box"><i class="fa-solid fa-mug-saucer"></i></div>
+              <div class="sound-card-title-box"><h4>Cafe Ambient</h4></div>
+              <div class="sound-card-action-box"><i class="fa-solid fa-play"></i></div>
+          </div>
+          <div class="sound-card-pill" onclick="selectMusicTrack(5)" id="soundCard5">
+              <div class="sound-card-icon-box"><i class="fa-solid fa-fire"></i></div>
+              <div class="sound-card-title-box"><h4>Night Campfire</h4></div>
+              <div class="sound-card-action-box"><i class="fa-solid fa-play"></i></div>
+          </div>
+          <div class="sound-card-pill" onclick="selectMusicTrack(6)" id="soundCard6">
+              <div class="sound-card-icon-box"><i class="fa-solid fa-wind"></i></div>
+              <div class="sound-card-title-box"><h4>White Noise</h4></div>
+              <div class="sound-card-action-box"><i class="fa-solid fa-play"></i></div>
+          </div>
+          <div class="sound-card-pill" onclick="selectMusicTrack(7)" id="soundCard7">
+              <div class="sound-card-icon-box"><i class="fa-regular fa-clock"></i></div>
+              <div class="sound-card-title-box"><h4>Clock Ticking</h4></div>
+              <div class="sound-card-action-box"><i class="fa-solid fa-play"></i></div>
+          </div>
+          <div class="sound-card-pill" onclick="selectMusicTrack(8)" id="soundCard8">
+              <div class="sound-card-icon-box"><i class="fa-solid fa-leaf"></i></div>
+              <div class="sound-card-title-box"><h4>Nature Forest</h4></div>
+              <div class="sound-card-action-box"><i class="fa-solid fa-play"></i></div>
+          </div>
+          <div class="sound-card-pill" onclick="selectMusicTrack(9)" id="soundCard9">
+              <div class="sound-card-icon-box"><i class="fa-solid fa-tower-broadcast"></i></div>
+              <div class="sound-card-title-box"><h4>Binaural Beats</h4></div>
+              <div class="sound-card-action-box"><i class="fa-solid fa-play"></i></div>
+          </div>
+      </div>
+      </div>
+  </section>
+
+
+  <!-- =========================
+       7. BOTTOM CHAT INPUT FOR ZORENO AI
+  ========================== -->
+  <div id="aiAttachmentPreviewBar" class="attachment-preview-strip" style="display:none;"></div>
+
+  <div class="chat-win-footer" id="inputAreaContainer" style="display:none;">
+      <button type="button" class="chat-footer-plus-btn" onclick="openFileOrPdfPicker()" title="Upload Image">
+          <i class="fa-solid fa-plus"></i>
+      </button>
+      <div class="chat-input-pill">
+          <div id="geminiAiInlineImgRow" class="gemini-inline-img-row"></div>
+          <div class="gemini-input-bottom-row">
+              <textarea id="userInput" rows="1" placeholder="Type a message..." autocomplete="off" oninput="autoResizeChatInput(this)"></textarea>
+              <button type="button" class="chat-footer-icon-btn" onclick="insertAiQuickEmoji()" title="Emoji"><i class="fa-regular fa-face-smile"></i></button>
+          </div>
+      </div>
+      <button type="button" class="chat-send-btn" id="sendBtn" onclick="sendMessage()" title="Send">
+          <i class="fa-solid fa-paper-plane"></i>
+      </button>
+      <input type="file" id="imageInput" accept="image/*" multiple hidden onchange="handleMultipleImages(event)">
+      <input type="file" id="docFileInput" accept="image/*" multiple hidden onchange="handleMultipleImages(event)">
+  </div>
+
+  <!-- =========================
+       8. FLOATING BOTTOM NAV
+  ========================== -->
+  <nav class="floating-nav" id="bottomNav" style="display:none;">
+      <button class="nav-item active" onclick="switchTab('chat', this)">
+          <i class="fa-solid fa-message"></i>
+          <span>Chats</span>
+      </button>
+      <button class="nav-item" onclick="switchTab('pro', this)">
+          <i class="fa-solid fa-crown"></i>
+          <span>Premium</span>
+      </button>
+      <button class="nav-item" onclick="switchTab('tools', this)">
+          <i class="fa-solid fa-layer-group"></i>
+          <span>Tools</span>
+      </button>
+      <button class="nav-item" onclick="switchTab('settings', this)">
+          <i class="fa-solid fa-gear"></i>
+          <span>Settings</span>
+      </button>
+  </nav>
+
+  <!-- =========================
+       9. EDIT PROFILE SCREEN
+  ========================== -->
+  <section class="profile-screen" id="profileScreen" style="display:none;">
+      <div class="profile-header">
+          <button type="button" class="profile-back-btn" onclick="showChatsHome()">
+              <i class="fa-solid fa-chevron-left"></i>
+          </button>
+          <h2>Edit Profile</h2>
+          <button type="button" class="profile-save-btn" id="profileSaveBtn" onclick="saveUserProfileChanges()">Save</button>
+      </div>
+      <p class="profile-subtitle">Change your details anytime</p>
+
+      <div class="profile-pic-container">
+          <div class="profile-pic-ring" onclick="document.getElementById('profileImageFileInput').click()" style="cursor: pointer;">
+              <img src="default_avatar.png" onerror="this.src='logo.png'" id="profileEditAvatarImg" alt="Profile">
+              <div class="camera-badge"><i class="fa-solid fa-camera"></i></div>
+          </div>
+          <input type="file" id="profileImageFileInput" accept="image/*" style="display: none;" onchange="previewAndUploadProfilePic(event)">
+          <p class="pic-hint" id="profileUsernameBadge">@student</p>
+      </div>
+
+      <div class="profile-input-card">
+          <i class="fa-solid fa-at icon-left" style="color:#7c3aed;"></i>
+          <div class="input-box">
+              <label>Unique Username</label>
+              <input type="text" id="profileEditUsername" placeholder="username" autocomplete="off">
+              <span id="usernameStatusHint" style="font-size:11px; font-weight:700; display:block; margin-top:3px;"></span>
+          </div>
+          <i class="fa-solid fa-circle-check icon-right" style="color:#10b981;"></i>
+      </div>
+
+      <div class="profile-input-card">
+          <i class="fa-regular fa-user icon-left"></i>
+          <div class="input-box">
+              <label>Name</label>
+              <input type="text" id="profileEditName" placeholder="Your Full Name">
+          </div>
+          <i class="fa-solid fa-pen icon-right"></i>
+      </div>
+
+      <div class="profile-input-card bio-card">
+          <i class="fa-solid fa-quote-left icon-left"></i>
+          <div class="input-box">
+              <label>Bio</label>
+              <textarea rows="2" id="profileEditBio" maxlength="150" oninput="document.getElementById('bioCharCount').innerText = this.value.length + '/150'">Learning. Creating. Improving. A better version, every day.</textarea>
+              <span class="char-count" id="bioCharCount">58/150</span>
+          </div>
+      </div>
+
+      <div class="profile-premium-card" onclick="openSubscription()" style="cursor:pointer;">
+          <div class="premium-crown-icon"><i class="fa-solid fa-bolt"></i></div>
+          <div class="premium-text">
+              <h4 id="profileCardTierTitle">Free Member</h4>
+              <p>Tap to view or upgrade plan</p>
+          </div>
+          <i class="fa-solid fa-chevron-right icon-right"></i>
+      </div>
+  </section>
+
+  <!-- =========================
+       10. REAL-TIME USER & GROUP CHAT SCREEN
+  ========================== -->
+  <section class="active-chat-screen" id="activeChatScreen" style="display: none;">
+      <div class="chat-win-header">
+          <div class="chat-win-user-info">
+              <button type="button" class="chat-back-btn" onclick="closeActiveDmChat()">
+                  <i class="fa-solid fa-chevron-left"></i>
+              </button>
+              <div class="chat-win-avatar-wrap" onclick="openFriendProfileScreen()" style="cursor:pointer;">
+                  <img id="activeChatAvatar" src="default_avatar.png" onerror="this.src='logo.png'" alt="User">
+                  <div class="chat-online-dot" id="activeChatOnlineDot"></div>
+              </div>
+              <div class="chat-win-text-meta" onclick="openFriendProfileScreen()" style="cursor:pointer;">
+                  <div class="chat-win-name-line">
+                      <h4 id="activeChatName">User</h4>
+                  </div>
+                  <p id="activeChatStatus">@student • <span style="color: #10b981;">Online</span></p>
+              </div>
+          </div>
+
+          <div class="chat-win-actions">
+              <button type="button" class="chat-top-icon-btn" onclick="showCallComingSoon()" title="Call">
+                  <i class="fa-solid fa-phone"></i>
+              </button>
+              <div style="position: relative;">
+                  <button type="button" class="chat-top-icon-btn" onclick="toggleDmHeaderMenu()" title="Menu">
+                      <i class="fa-solid fa-ellipsis-vertical"></i>
+                  </button>
+                  <div id="dmHeaderDropdownMenu" class="custom-dropdown-menu" style="display:none;"></div>
+              </div>
+          </div>
+      </div>
+
+      <div id="activeChatMessages" class="chat-win-messages"></div>
+
+      <div id="dmAttachmentPreviewBar" class="attachment-preview-strip" style="display:none;"></div>
+      <div id="dmBlockedFooterBanner" class="dm-blocked-footer-banner" style="display:none;"></div>
+
+      <div class="chat-win-footer">
+          <button type="button" class="chat-footer-plus-btn" onclick="openDmImagePicker()">
+              <i class="fa-solid fa-plus"></i>
+          </button>
+          <div class="chat-input-pill">
+              <div id="dmReplyPreviewStrip" class="zoreno-reply-preview-strip">
+                  <div class="r-body"><span class="r-sender">Reply</span><span class="r-text"></span></div>
+                  <button type="button" class="r-close" onclick="cancelActiveReplyOrEdit()"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+              <div id="geminiDmInlineImgRow" class="gemini-inline-img-row"></div>
+              <div class="gemini-input-bottom-row">
+                  <textarea id="activeChatInput" rows="1" placeholder="Type a message..." autocomplete="off" oninput="autoResizeChatInput(this); handleLiveTypingInput()"></textarea>
+                  <button type="button" class="chat-footer-icon-btn" onclick="openZorenoEmojiPacksAndStatusModal()"><i class="fa-regular fa-face-smile"></i></button>
+              </div>
+          </div>
+          <button type="button" onclick="sendRealtimeMessage()" class="chat-send-btn">
+              <i class="fa-solid fa-paper-plane"></i>
+          </button>
+          <input type="file" id="dmImageInput" accept="image/*" multiple hidden onchange="handleDmImageSelect(event)">
+      </div>
+  </section>
+
+  <!-- =========================
+       10B. FRIEND PROFILE VIEW SCREEN
+  ========================== -->
+  <section class="friend-profile-screen" id="friendProfileScreen" style="display:none;">
+      <div class="fp-top-bar">
+          <button type="button" class="fp-circle-btn" onclick="closeFriendProfileScreen()">
+              <i class="fa-solid fa-chevron-left"></i>
+          </button>
+          <div style="position: relative;">
+              <button type="button" class="fp-circle-btn" onclick="toggleFpHeaderMenu()">
+                  <i class="fa-solid fa-ellipsis-vertical"></i>
+              </button>
+              <div id="fpHeaderDropdownMenu" class="custom-dropdown-menu" style="display:none;">
+                  <button type="button" onclick="toggleFpHeaderMenu(false); clearCurrentDmChat();"><i class="fa-regular fa-trash-can"></i> Clear Chat</button>
+                  <button type="button" id="fpBlockMenuBtn" onclick="toggleFpHeaderMenu(false); toggleBlockChatUser();" style="color:#f59e0b;"><i class="fa-solid fa-ban"></i> Block User</button>
+                  <button type="button" onclick="toggleFpHeaderMenu(false); openReportModal();" style="color:#ef4444;"><i class="fa-solid fa-flag"></i> Report User</button>
+              </div>
+          </div>
+      </div>
+
+      <div class="fp-hero-center">
+          <div class="fp-avatar-ring">
+              <img id="fpAvatarImg" src="default_avatar.png" onerror="this.src='logo.png'" alt="User">
+              <span id="fpAvatarDot" class="fp-online-dot"></span>
+          </div>
+          <h2 id="fpFullName">Student</h2>
+          <p id="fpUsernameSub">@student</p>
+          <div id="fpOnlinePill" class="fp-status-pill">
+              <span class="fp-pill-dot" id="fpPillDot"></span>
+              <span id="fpPillText">Online</span>
+          </div>
+      </div>
+
+      <div class="fp-actions-grid" style="grid-template-columns: repeat(4, 1fr);">
+          <button type="button" class="fp-action-box" onclick="closeFriendProfileScreen()">
+              <i class="fa-solid fa-comment-dots" style="color: #7c3aed;"></i>
+              <span style="color: #7c3aed;">Message</span>
+          </button>
+          <button type="button" class="fp-action-box" onclick="triggerZorenoAudioCall()">
+              <i class="fa-solid fa-phone"></i><span>Voice Call</span>
+          </button>
+          <button type="button" class="fp-action-box fp-video-glow-btn" onclick="triggerZorenoVideoCall()">
+              <i class="fa-solid fa-video"></i><span>Video Call</span>
+          </button>
+          <button type="button" class="fp-action-box fp-friend-btn" id="fpMakeFriendBtn" onclick="handleMakeAsFriendClick()">
+              <i class="fa-solid fa-user-plus" style="color:#10b981;"></i><span style="color:#10b981;">Add Friend</span>
+          </button>
+      </div>
+
+      <div class="fp-info-card">
+          <div class="fp-card-icon" style="color:#7c3aed; font-weight:800; font-size:20px;">@</div>
+          <div class="fp-card-body">
+              <label>USERNAME</label>
+              <h4 id="fpCardUsername">student</h4>
+          </div>
+          <button type="button" class="fp-copy-btn" onclick="copyFriendUsername()" title="Copy Username">
+              <i class="fa-regular fa-copy"></i>
+          </button>
+      </div>
+
+      <div class="fp-info-card">
+          <div class="fp-card-icon"><i class="fa-regular fa-user"></i></div>
+          <div class="fp-card-body">
+              <label>NAME</label>
+              <h4 id="fpCardName">Student</h4>
+          </div>
+      </div>
+
+      <div class="fp-info-card" style="align-items:flex-start;">
+          <div class="fp-card-icon" style="margin-top:2px;"><i class="fa-solid fa-quote-left"></i></div>
+          <div class="fp-card-body">
+              <label>BIO</label>
+              <p id="fpCardBio">Student | Exploring new things | Keep learning.</p>
+              <span id="fpBioCount" class="fp-bio-count">46/150</span>
+          </div>
+      </div>
+
+      <div class="fp-info-card" style="justify-content:space-between;">
+          <div style="display:flex; align-items:center; gap:14px;">
+              <span id="fpBottomStatusDot" style="width:12px; height:12px; border-radius:50%; background:#10b981; display:inline-block;"></span>
+              <span style="font-size:15px; font-weight:600; color:#334155;">Status</span>
+          </div>
+          <span id="fpBottomStatusText" style="font-size:14px; font-weight:600; color:#64748b;">Online</span>
+      </div>
+  </section>
+
+  <!-- =========================
+       11. ALL POPUP MODALS
+  ========================== -->
+  <div class="custom-modal-overlay" id="alertModal" style="display:none;">
+      <div class="custom-modal-box alert-box">
+          <div class="modal-icon error-icon" id="alertModalIcon"><i class="fa-solid fa-circle-xmark"></i></div>
+          <h3 id="alertModalTitle">Notice</h3>
+          <p id="alertModalMsg">Message goes here.</p>
+          <button class="modal-submit-btn" onclick="closeCustomAlert()">OK</button>
+      </div>
+  </div>
+
+  <div class="custom-modal-overlay" id="policyModal" style="display:none;">
+      <div class="custom-modal-box policy-box">
+          <div class="policy-modal-header">
+              <h3 id="policyModalTitle">Policy</h3>
+              <button class="modal-close-btn" onclick="closePolicyModal()"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <div id="policyModalContent" class="policy-content"></div>
+          <button class="modal-submit-btn" onclick="closePolicyModal()">I Understand & Accept</button>
+      </div>
+  </div>
+
+  <div class="custom-modal-overlay" id="worldCountryModal" style="display:none;">
+      <div class="custom-modal-box cute-country-modal-box">
+          <div class="country-modal-header">
+              <div class="country-title-pill">
+                  <i class="fa-solid fa-earth-americas"></i>
+                  <span>Select Country</span>
+              </div>
+              <button type="button" class="modal-close-btn" onclick="closeWorldCountryModal()">
+                  <i class="fa-solid fa-xmark"></i>
+              </button>
+          </div>
+          <div class="country-search-pill">
+              <i class="fa-solid fa-magnifying-glass"></i>
+              <input type="text" id="countrySearchInput" placeholder="Search any country..." oninput="filterWorldCountries(this.value)">
+          </div>
+          <div class="world-country-scroll-list" id="worldCountryList"></div>
+      </div>
+  </div>
+
+  <div class="custom-modal-overlay" id="aiFeedbackModal" style="display:none;">
+      <div class="custom-modal-box">
+          <div class="policy-modal-header">
+              <h3>Send AI Feedback</h3>
+              <button class="modal-close-btn" onclick="document.getElementById('aiFeedbackModal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <textarea id="aiFeedbackText" placeholder="Write your feedback here..." rows="4" style="width:100%; padding:12px; border-radius:14px; border:1.5px solid #cbd5e1; outline:none; font-family:inherit; margin-bottom:14px; resize:none;"></textarea>
+          <button class="modal-submit-btn" onclick="submitAiFeedback()">Submit Feedback 🚀</button>
+      </div>
+  </div>
+
+  <div class="custom-modal-overlay" id="userReportModal" style="display:none;">
+      <div class="custom-modal-box">
+          <div class="policy-modal-header">
+              <h3 style="color:#ef4444;">Report User</h3>
+              <button class="modal-close-btn" onclick="document.getElementById('userReportModal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <textarea id="userReportReason" placeholder="Reason for reporting this user..." rows="4" style="width:100%; padding:12px; border-radius:14px; border:1.5px solid #cbd5e1; outline:none; font-family:inherit; margin-bottom:14px; resize:none;"></textarea>
+          <button class="modal-submit-btn" style="background: linear-gradient(135deg, #ef4444, #dc2626);" onclick="submitUserReport()">Send Report 🚨</button>
+      </div>
+  </div>
+
+  <div class="custom-modal-overlay" id="deleteMsgModal" style="display:none;"></div>
+
+  <!-- Block / Unblock Confirmation Modal -->
+  <div class="custom-modal-overlay" id="blockConfirmModal" style="display:none;">
+      <div class="custom-modal-box alert-box">
+          <div class="modal-icon error-icon"><i class="fa-solid fa-ban"></i></div>
+          <h3 id="blockModalTitle">Block This Person?</h3>
+          <p id="blockModalDesc">Are you sure you want to block this person? Neither of you will be able to send messages.</p>
+          <div style="display:flex; gap:10px; margin-top:16px;">
+              <button type="button" class="modal-submit-btn" style="background:#e2e8f0; color:#0f172a;" onclick="document.getElementById('blockConfirmModal').style.display='none'">Cancel</button>
+              <button type="button" class="modal-submit-btn" id="blockModalConfirmBtn" style="background:#ef4444;" onclick="executeConfirmedBlockToggle()">OK</button>
+          </div>
+      </div>
+  </div>
+
+  <!-- Clear Chat Confirmation Modal -->
+  <div class="custom-modal-overlay" id="clearChatConfirmModal" style="display:none;">
+      <div class="custom-modal-box alert-box">
+          <div class="modal-icon error-icon"><i class="fa-regular fa-trash-can"></i></div>
+          <h3 id="clearChatModalTitle">Clear Chat Messages?</h3>
+          <p id="clearChatModalDesc">Are you sure you want to delete all messages in this chat?</p>
+          <div style="display:flex; gap:10px; margin-top:16px;">
+              <button type="button" class="modal-submit-btn" style="background:#e2e8f0; color:#0f172a;" onclick="document.getElementById('clearChatConfirmModal').style.display='none'">Cancel</button>
+              <button type="button" class="modal-submit-btn" style="background:#ef4444;" onclick="executeConfirmedClearChat()">Delete</button>
+          </div>
+      </div>
+  </div>
+
+  <!-- Forgot Password Modal -->
+  <div class="custom-modal-overlay" id="forgotPassModal" style="display:none;">
+      <div class="custom-modal-box">
+          <div class="policy-modal-header">
+              <h3>Reset Password 🔑</h3>
+              <button type="button" class="modal-close-btn" onclick="document.getElementById('forgotPassModal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <p style="font-size:13px; color:#64748b; margin-bottom:12px;">Enter your registered email address to receive a password reset link.</p>
+          <input type="email" id="resetPassEmailInp" placeholder="Enter your email address" style="width:100%; padding:12px 14px; border-radius:12px; border:1.5px solid #cbd5e1; margin-bottom:14px; outline:none;">
+          <div style="display:flex; gap:10px;">
+              <button type="button" class="modal-submit-btn" style="background:#e2e8f0; color:#0f172a;" onclick="document.getElementById('forgotPassModal').style.display='none'">Cancel</button>
+              <button type="button" class="modal-submit-btn" onclick="confirmSendPasswordReset()">Send Reset Link</button>
+          </div>
+      </div>
+  </div>
+
+  <!-- FULL SCREEN IMAGE PREVIEW -->
+  <div class="custom-modal-overlay" id="fullImagePreviewModal" style="display:none; flex-direction:column; justify-content:space-between; padding:18px;" onclick="this.style.display='none'">
+      <div class="full-img-topbar" onclick="event.stopPropagation();">
+          <button type="button" class="full-img-action-btn" onclick="document.getElementById('fullImagePreviewModal').style.display='none'">
+              <i class="fa-solid fa-arrow-left"></i>
+          </button>
+          <button type="button" class="full-img-download-btn" onclick="downloadFullPreviewImage()">
+              <i class="fa-solid fa-download"></i>
+              <span>Download</span>
+          </button>
+      </div>
+      <img id="fullImagePreviewTarget" src="" alt="Preview" onclick="event.stopPropagation();" style="max-width:94vw; max-height:78vh; margin:auto; border-radius:18px; object-fit:contain; box-shadow:0 20px 50px rgba(0,0,0,0.5);">
+      <div style="height:20px;"></div>
+  </div>
+
+  <!-- HOME PROFILE & FIREBASE CHAT DELETE MODAL -->
+  <div class="custom-modal-overlay" id="deleteHomeChatModal" style="display:none;">
+      <div class="custom-modal-box alert-box">
+          <div class="modal-icon error-icon"><i class="fa-solid fa-user-slash"></i></div>
+          <h3 id="delHomeChatTitle">Delete Chat & Profile?</h3>
+          <p>This will remove this profile from your home screen and permanently delete all chat messages from the server.</p>
+          <div style="display:flex; gap:10px; margin-top:15px;">
+              <button class="modal-submit-btn" style="background:#e2e8f0; color:#0f172a;" onclick="document.getElementById('deleteHomeChatModal').style.display='none'">Cancel</button>
+              <button class="modal-submit-btn" style="background:#ef4444;" onclick="confirmDeleteHomeChatAndFirebase()">Delete Forever</button>
+          </div>
+      </div>
+  </div>
+
+  <div class="custom-modal-overlay" id="deleteAccountModal" style="display:none;">
+      <div class="custom-modal-box">
+          <div class="policy-modal-header">
+              <h3 style="color:#ef4444;">Delete Account</h3>
+              <button class="modal-close-btn" onclick="document.getElementById('deleteAccountModal').style.display='none'"><i class="fa-solid fa-xmark"></i></button>
+          </div>
+          <p style="font-size:13px; color:#64748b; margin-bottom:15px;">Warning: This will permanently erase your profile, subscriptions, and chat history. Enter details to confirm.</p>
+          <input type="email" id="delAccEmail" placeholder="Enter Email" style="width:100%; padding:12px; border-radius:12px; border:1px solid #cbd5e1; margin-bottom:10px; outline:none; font-family:inherit;">
+          <input type="password" id="delAccPass" placeholder="Enter Password" style="width:100%; padding:12px; border-radius:12px; border:1px solid #cbd5e1; margin-bottom:15px; outline:none; font-family:inherit;">
+          <button class="modal-submit-btn" style="background: linear-gradient(135deg, #ef4444, #dc2626);" onclick="confirmDeleteAccount()">Permanently Delete</button>
+      </div>
+  </div>
+
+  <!-- REWARDED AD MODAL (+3 CHATS) -->
+  <div class="custom-modal-overlay" id="rewardedAdModal" style="display:none;">
+      <div class="rewarded-ad-card">
+          <button type="button" class="rewarded-close-btn" onclick="closeRewardedAdModal()">
+              <i class="fa-solid fa-xmark"></i>
+          </button>
+          <h2 class="rewarded-main-title">
+              You've used all your<br>
+              <span class="gradient-chat-highlight">free energy</span> for today
+          </h2>
+          <p class="rewarded-sub-desc">
+              Watch a short ad to recharge <strong>+30% AI Energy</strong><br>
+              and keep your study session going!
+          </p>
+          <button type="button" class="watch-ad-gradient-btn" id="watchRewardedAdBtn" onclick="triggerRewardedAdForChats()">
+              <i class="fa-solid fa-circle-play"></i>
+              <span id="watchAdBtnText">Watch Ad</span>
+          </button>
+      </div>
+  </div>
+
+  
+
+  <script src="app.js"></script>
+</body>
+</html>
