@@ -305,47 +305,51 @@ jobs:
           banner_id = os.environ.get("ADMOB_BANNER_ID", "ca-app-pub-5825754850490611/8792568001")
           rewarded_id = os.environ.get("ADMOB_REWARDED_ID", "ca-app-pub-5825754850490611/4904670790")
 
-          # --- A. CLEAN RECTANGULAR CONTAINER CSS (NO GLASS BLUR BEHIND AD) ---
-          v103_css = r"""
-          /* ZV103_RECT_BANNER_CONTAINER */
-          #zorenoAdmobBannerContainer {
+          # --- A. CLEAN BANNER BOX + BALANCED AUTH SCREEN BOTTOM GAP ---
+          v105_css = r"""
+          /* ZV105_CLEAN_NATIVE_BANNER_AND_AUTH */
+          #zorenoAdmobBannerContainer,
+          body.zv105-home-free-banner #zorenoAdmobBannerContainer {
               display: none !important;
-          }
-          body.zv103-home-free-banner #zorenoAdmobBannerContainer {
-              display: flex !important;
-              align-items: center !important;
-              justify-content: center !important;
-              min-height: 54px !important;
-              height: 54px !important;
-              border-radius: 4px !important;
-              background: transparent !important;
-              backdrop-filter: none !important;
-              -webkit-backdrop-filter: none !important;
-              box-shadow: none !important;
-              border: 1px solid rgba(148, 163, 184, 0.35) !important;
-              overflow: hidden !important;
-              padding: 0 !important;
-          }
-          body.zv103-ad-loaded #zorenoAdmobBannerContainer .zv89-ad-mount-hint,
-          body.zv103-ad-loaded #zorenoAdmobBannerContainer .zv89-ad-badge-mini {
-              display: none !important;
-              opacity: 0 !important;
               visibility: hidden !important;
+              height: 0 !important;
+              min-height: 0 !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              border: none !important;
+              background: transparent !important;
+              box-shadow: none !important;
+          }
+          #authScreen {
+              min-height: 100dvh !important;
+              height: 100dvh !important;
+              display: flex !important;
+              flex-direction: column !important;
+              justify-content: space-between !important;
+              padding-top: 22px !important;
+              padding-bottom: 28px !important;
+              box-sizing: border-box !important;
+          }
+          #authScreen .auth-card,
+          #authScreen form {
+              margin-top: auto !important;
+              margin-bottom: auto !important;
           }
           """
           for css_file in glob.glob("app/src/main/assets/style*.css"):
               with open(css_file, "r", encoding="utf-8", errors="ignore") as f:
                   csscode = f.read()
-              if "ZV103_RECT_BANNER_CONTAINER" not in csscode:
-                  csscode = csscode + "\n" + v103_css
+              csscode = re.sub(r'/\* ZV103_RECT_BANNER_CONTAINER \*/.*?\*/', '', csscode, flags=re.S)
+              if "ZV105_CLEAN_NATIVE_BANNER_AND_AUTH" not in csscode:
+                  csscode = csscode + "\n" + v105_css
                   with open(css_file, "w", encoding="utf-8") as f:
                       f.write(csscode)
 
-          # --- B. STRICT CHATS-ONLY BANNER + TOOL EXPORT DOWNLOAD FIX + HIDE GOOGLE BTN ---
-          v103_js = r"""
-          // ZV103_AUTO_PATCH
-          (function initZorenoV103Fixes() {
-              let v103TierConfirmed = false;
+          # --- B. ZERO 0.2s POP ON CHAT OPEN + CLEAN TOOL DOWNLOAD + HIDE GOOGLE BTN ---
+          v105_js = r"""
+          // ZV105_AUTO_PATCH
+          (function initZorenoV105FinalFixes() {
+              let v105TierConfirmed = false;
 
               function isReallyVisible(el) {
                   if (!el) return false;
@@ -372,75 +376,88 @@ jobs:
                   return false;
               }
 
-              function syncV103Banner() {
+              function hideBannerHard() {
+                  document.body?.classList?.remove("zv105-home-free-banner");
+                  try { window.AndroidAdMob?.hideHomeBannerAd?.(); } catch (e) {}
+              }
+
+              function syncV105Banner() {
                   const tier = typeof window.getEffectiveTier === "function" ? window.getEffectiveTier() : 0;
                   const home = document.getElementById("chatListScreen");
-                  const box = document.getElementById("zorenoAdmobBannerContainer");
                   const onChatsTab = isReallyVisible(home) && !isAnySubScreenOpen() && !document.body.classList.contains("keyboard-open");
 
-                  if (!v103TierConfirmed || tier > 0 || !onChatsTab || !box) {
-                      document.body.classList.remove("zv103-home-free-banner");
-                      window.AndroidAdMob?.hideHomeBannerAd?.();
+                  if (!v105TierConfirmed || tier > 0 || !onChatsTab) {
+                      hideBannerHard();
                       return;
                   }
 
-                  document.body.classList.add("zv103-home-free-banner");
-                  const r = box.getBoundingClientRect();
-                  if (r.width > 120 && r.height > 36 && r.top >= 16 && r.bottom <= window.innerHeight - 60) {
-                      window.AndroidAdMob?.positionHomeBannerAd?.(
-                          Math.round(r.top),
-                          Math.round(r.left),
-                          Math.round(r.width),
-                          Math.round(r.height)
-                      );
+                  const anchor = document.querySelector(".focus-sprint-card");
+                  const tabs = document.querySelector(".chat-tabs");
+                  if (!anchor || !tabs) {
+                      hideBannerHard();
+                      return;
+                  }
+
+                  const aRect = anchor.getBoundingClientRect();
+                  const tRect = tabs.getBoundingClientRect();
+                  const gapTop = aRect.bottom + 8;
+                  const gapBottom = tRect.top - 8;
+                  const boxH = Math.min(58, Math.max(46, Math.round(gapBottom - gapTop)));
+                  const boxW = Math.min(Math.round(aRect.width), Math.round(window.innerWidth - 24));
+                  const boxLeft = Math.round((window.innerWidth - boxW) / 2);
+                  const boxTop = Math.round(gapTop + Math.max(0, (gapBottom - gapTop - boxH) / 2));
+
+                  if (boxW > 140 && boxH >= 44 && boxTop >= 20 && (boxTop + boxH) <= window.innerHeight - 60) {
+                      document.body.classList.add("zv105-home-free-banner");
+                      window.AndroidAdMob?.positionHomeBannerAd?.(boxTop, boxLeft, boxW, boxH);
                   } else {
-                      window.AndroidAdMob?.hideHomeBannerAd?.();
+                      hideBannerHard();
                   }
               }
 
-              window.zorenoSyncBannerNow = syncV103Banner;
+              window.zorenoSyncBannerNow = syncV105Banner;
 
-              // Immediately hide banner on any tap/navigation before screen transition settles
               document.addEventListener("pointerdown", () => {
-                  window.AndroidAdMob?.hideHomeBannerAd?.();
-                  setTimeout(syncV103Banner, 120);
-                  setTimeout(syncV103Banner, 350);
+                  hideBannerHard();
+              }, true);
+              document.addEventListener("click", () => {
+                  hideBannerHard();
+                  setTimeout(syncV105Banner, 220);
               }, true);
 
-              setInterval(syncV103Banner, 250);
+              setInterval(syncV105Banner, 350);
 
               const waitAuth = setInterval(() => {
                   if (typeof auth !== "undefined" && auth && typeof db !== "undefined" && db) {
                       clearInterval(waitAuth);
                       auth.onAuthStateChanged(u => {
                           if (!u?.uid) {
-                              v103TierConfirmed = false;
-                              syncV103Banner();
+                              v105TierConfirmed = false;
+                              hideBannerHard();
                               return;
                           }
                           if (!navigator.onLine) {
-                              v103TierConfirmed = true;
-                              syncV103Banner();
+                              v105TierConfirmed = true;
+                              syncV105Banner();
                               return;
                           }
                           db.collection("users").doc(u.uid).onSnapshot(() => {
-                              v103TierConfirmed = true;
-                              syncV103Banner();
+                              v105TierConfirmed = true;
+                              syncV105Banner();
                           }, () => {
-                              v103TierConfirmed = true;
-                              syncV103Banner();
+                              v105TierConfirmed = true;
+                              syncV105Banner();
                           });
                       });
                   }
               }, 300);
 
-              // FIX TOOL EXPORT REWARD DOWNLOAD + PREVENT FAKE "+3 CHAT" MESSAGE IN TOOLS
-              window._zv103ToolExportContext = false;
+              window._zv105ToolExportContext = false;
               document.addEventListener("click", (e) => {
                   if (e.target?.closest?.("#ztWatchExportAdBtn")) {
-                      window._zv103ToolExportContext = true;
+                      window._zv105ToolExportContext = true;
                   } else if (e.target?.closest?.("[id*='ai'], [class*='ai-'], [id*='quota'], [id*='unlock']")) {
-                      window._zv103ToolExportContext = false;
+                      window._zv105ToolExportContext = false;
                   }
               }, true);
 
@@ -456,8 +473,8 @@ jobs:
                   if (typeof _origRewardGranted === "function") {
                       try { _origRewardGranted.apply(this, arguments); } catch (e) {}
                   }
-                  if (window._zv103ToolExportContext) {
-                      window._zv103ToolExportContext = false;
+                  if (window._zv105ToolExportContext) {
+                      window._zv105ToolExportContext = false;
                       setTimeout(() => {
                           const dlBtn = document.querySelector("#ztoolDynamicWorkspace [id*='download' i], #ztoolDynamicWorkspace [id*='export' i], #ztoolDynamicWorkspace [id*='save' i], #ztoolDynamicWorkspace button[onclick*='download' i], #ztoolDynamicWorkspace button[onclick*='save' i], #ztoolDynamicWorkspace button[onclick*='export' i]");
                           if (dlBtn && !dlBtn.disabled) dlBtn.click();
@@ -474,7 +491,6 @@ jobs:
                   };
               }
 
-              // EXTERNAL MAPS LINK FIX
               const isExternalMapOrAppUrl = (u) => typeof u === "string" && /google\.com\/maps|maps\.app\.goo\.gl|maps\.google\.|^geo:|^intent:/i.test(u);
               const _origOpen = window.open;
               window.open = function (url, target, feats) {
@@ -493,7 +509,6 @@ jobs:
                   }
               }, true);
 
-              // HIDE "CONTINUE WITH GOOGLE" BUTTON CLEANLY
               function hideGoogleBtns() {
                   const nodes = document.querySelectorAll("button, a, div, span");
                   for (const el of nodes) {
@@ -527,12 +542,12 @@ jobs:
                   lambda m: f'let GEMINI_API_KEY = {split_key_expr};',
                   jscode
               )
-              if "ZV103_AUTO_PATCH" not in jscode:
-                  jscode = jscode + "\n" + v103_js
+              jscode = re.sub(r'// ZV103_AUTO_PATCH.*', '', jscode, flags=re.S)
+              if "ZV105_AUTO_PATCH" not in jscode:
+                  jscode = jscode + "\n" + v105_js
               with open(js_file, "w", encoding="utf-8") as f:
                   f.write(jscode)
 
-          # --- C. PATCH MAINACTIVITY.JAVA ---
           for java_file in glob.glob("app/src/main/java/**/MainActivity.java", recursive=True):
               with open(java_file, "r", encoding="utf-8", errors="ignore") as f:
                   code = f.read()
@@ -678,7 +693,7 @@ jobs:
                                   zorenoBannerRetryCount = 0;
                                   runOnUiThread(() -> {
                                       if (webView != null) {
-                                          webView.evaluateJavascript("document.body.classList.add('zv103-ad-loaded');if(window.zorenoSyncBannerNow)window.zorenoSyncBannerNow();", null);
+                                          webView.evaluateJavascript("if(window.zorenoSyncBannerNow)window.zorenoSyncBannerNow();", null);
                                       }
                                   });
                               }
