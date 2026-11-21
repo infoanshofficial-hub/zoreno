@@ -32,7 +32,7 @@ jobs:
           ADMOB_BANNER_ID="ca-app-pub-5825754850490611/8792568001"
           ADMOB_REWARDED_ID="ca-app-pub-5825754850490611/4904670790"
 
-          # 1. Backup latest repo HTML/CSS/JS so ZIP never overwrites your new code
+          # 1. Backup root HTML/CSS/JS if present, then extract ZIP
           mkdir -p /tmp/zoreno_latest_backup
           [ -f "index.html" ] && cp -f index.html /tmp/zoreno_latest_backup/index.html || true
           [ -f "app.js" ] && cp -f app.js /tmp/zoreno_latest_backup/app.js || true
@@ -144,7 +144,7 @@ jobs:
           EOF
           cp -f app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
-          # Transparent 1dp icon so Android 12+ never shows a pink/giant splash logo before your real splash
+          # Transparent 1dp icon so Android 12+ never shows a pink/giant splash logo
           cat << 'EOF' > app/src/main/res/drawable/ic_empty_splash.xml
           <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
               <size android:width="1dp" android:height="1dp"/>
@@ -170,9 +170,9 @@ jobs:
             cp -f "$ICON_SRC" app/src/main/assets/splash.png
           fi
 
-          # 3. Closed-App WorkManager Notification Worker (Android 12-15 Safe, Clean Sticker Text!)
-          cat << EOF > "app/src/main/java/$PKG_DIR/ZorenoNotifWorker.java"
-          package $PKG_NAME;
+          # 3. Closed-App WorkManager Notification Worker (Quoted 'EOF' -> ZERO Escape Bugs!)
+          cat << 'EOF' > "app/src/main/java/$PKG_DIR/ZorenoNotifWorker.java"
+          package __PKG_NAME__;
           import android.app.NotificationChannel;
           import android.app.NotificationManager;
           import android.app.PendingIntent;
@@ -307,8 +307,9 @@ jobs:
               }
           }
           EOF
+          sed -i "s/__PKG_NAME__/$PKG_NAME/g" "app/src/main/java/$PKG_DIR/ZorenoNotifWorker.java"
 
-          # 4. Auto-Patch MainActivity.java, app.js & AndroidManifest.xml Automatically!
+          # 4. Auto-Patch MainActivity.java (with Play Store In-App Auto Update!), app.js & AndroidManifest.xml
           export ADMOB_APP_ID ADMOB_BANNER_ID ADMOB_REWARDED_ID
           python3 - << 'PYEOF'
           import glob, os, re
@@ -322,7 +323,11 @@ jobs:
               with open(js_file, "r", encoding="utf-8", errors="ignore") as f:
                   jscode = f.read()
               split_key_expr = 'localStorage.getItem("zorenoCloudApiKey") || ("AQ.Ab8RN6JD9hPTj4ql1" + "TKnZiiYYtgv48XVsjnBd" + "GSKXcga0gs5wA")'
-              jscode = re.sub(r'let\s+GEMINI_API_KEY\s*=\s*localStorage\.getItem\("zorenoCloudApiKey"\)\s*\|\|\s*""\s*;', f'let GEMINI_API_KEY = {split_key_expr};', jscode)
+              jscode = re.sub(
+                  r'let\s+GEMINI_API_KEY\s*=\s*localStorage\.getItem\("zorenoCloudApiKey"\)\s*\|\|\s*""\s*;',
+                  lambda m: f'let GEMINI_API_KEY = {split_key_expr};',
+                  jscode
+              )
               with open(js_file, "w", encoding="utf-8") as f:
                   f.write(jscode)
 
@@ -340,6 +345,9 @@ jobs:
                   extra_fields = r"""
                   private androidx.activity.result.ActivityResultLauncher<android.content.Intent> zorenoGoogleLauncher;
                   private androidx.activity.result.ActivityResultLauncher<android.content.Intent> zorenoFileChooserLauncher;
+                  private androidx.activity.result.ActivityResultLauncher<androidx.activity.result.IntentSenderRequest> zorenoUpdateLauncher;
+                  private com.google.android.play.core.appupdate.AppUpdateManager zorenoAppUpdateManager;
+                  private com.google.android.play.core.install.InstallStateUpdatedListener zorenoInstallListener;
                   private android.webkit.ValueCallback<android.net.Uri[]> zorenoFilePathCallback;
                   private android.net.Uri zorenoCameraPhotoUri;
                   private android.speech.tts.TextToSpeech zorenoTts;
@@ -349,6 +357,47 @@ jobs:
                   private boolean zorenoRewardLoading = false;
                   private com.google.android.gms.ads.AdView zorenoHomeBannerAd;
                   private boolean zorenoGoogleTriedFallback = false;
+
+                  private void checkPlayStoreInAppUpdate() {
+                      try {
+                          zorenoAppUpdateManager = com.google.android.play.core.appupdate.AppUpdateManagerFactory.create(MainActivity.this);
+                          zorenoInstallListener = state -> {
+                              if (state.installStatus() == com.google.android.play.core.install.model.InstallStatus.DOWNLOADED) {
+                                  if (zorenoAppUpdateManager != null) {
+                                      zorenoAppUpdateManager.completeUpdate();
+                                  }
+                              }
+                          };
+                          zorenoAppUpdateManager.registerListener(zorenoInstallListener);
+                          zorenoAppUpdateManager.getAppUpdateInfo().addOnSuccessListener(info -> {
+                              try {
+                                  if (info.installStatus() == com.google.android.play.core.install.model.InstallStatus.DOWNLOADED) {
+                                      zorenoAppUpdateManager.completeUpdate();
+                                      return;
+                                  }
+                                  if (info.updateAvailability() == com.google.android.play.core.install.model.UpdateAvailability.UPDATE_AVAILABLE) {
+                                      if (info.isUpdateTypeAllowed(com.google.android.play.core.install.model.AppUpdateType.FLEXIBLE)) {
+                                          zorenoAppUpdateManager.startUpdateFlowForResult(
+                                              info,
+                                              zorenoUpdateLauncher,
+                                              com.google.android.play.core.appupdate.AppUpdateOptions.newBuilder(
+                                                  com.google.android.play.core.install.model.AppUpdateType.FLEXIBLE
+                                              ).build()
+                                          );
+                                      } else if (info.isUpdateTypeAllowed(com.google.android.play.core.install.model.AppUpdateType.IMMEDIATE)) {
+                                          zorenoAppUpdateManager.startUpdateFlowForResult(
+                                              info,
+                                              zorenoUpdateLauncher,
+                                              com.google.android.play.core.appupdate.AppUpdateOptions.newBuilder(
+                                                  com.google.android.play.core.install.model.AppUpdateType.IMMEDIATE
+                                              ).build()
+                                          );
+                                      }
+                                  }
+                              } catch (Exception ignored) {}
+                          });
+                      } catch (Exception ignored) {}
+                  }
 
                   private boolean isInstalledFromPlayStore() {
                       try {
@@ -440,7 +489,12 @@ jobs:
                   """.replace("__BANNER_ID__", banner_id).replace("__REWARDED_ID__", rewarded_id)
 
                   if "zorenoGoogleLauncher" not in code:
-                      code = re.sub(r'(class\s+MainActivity\s+extends\s+[^{]+\{)', r'\1\n' + extra_fields, code, count=1)
+                      code = re.sub(
+                          r'(class\s+MainActivity\s+extends\s+[^{]+\{)',
+                          lambda m: m.group(1) + "\n" + extra_fields,
+                          code,
+                          count=1
+                      )
 
                   inset_code = r"""
                   setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
@@ -510,6 +564,12 @@ jobs:
                       }
                   });
 
+                  zorenoUpdateLauncher = registerForActivityResult(
+                      new androidx.activity.result.contract.ActivityResultContracts.StartIntentSenderForResult(),
+                      result -> {}
+                  );
+                  checkPlayStoreInAppUpdate();
+
                   zorenoFileChooserLauncher = registerForActivityResult(
                       new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(),
                       result -> {
@@ -566,7 +626,12 @@ jobs:
                   """.replace("__REWARDED_ID__", rewarded_id)
 
                   if "zorenoGoogleLauncher = registerForActivityResult" not in code:
-                      code = re.sub(r'(super\.onCreate\s*\([^)]*\)\s*;)', r'\1\n' + inset_code, code, count=1)
+                      code = re.sub(
+                          r'(super\.onCreate\s*\([^)]*\)\s*;)',
+                          lambda m: m.group(1) + "\n" + inset_code,
+                          code,
+                          count=1
+                      )
 
                   js_bridge = r"""
                   webView.getSettings().setMediaPlaybackRequiresUserGesture(false);
@@ -875,9 +940,19 @@ jobs:
 
                   if "ZorenoGoogleAuth" not in code:
                       if "webView.loadUrl(" in code:
-                          code = re.sub(r'(webView\.loadUrl\s*\()', js_bridge + r'\n\1', code, count=1)
+                          code = re.sub(
+                              r'(webView\.loadUrl\s*\()',
+                              lambda m: js_bridge + "\n" + m.group(1),
+                              code,
+                              count=1
+                          )
                       else:
-                          code = re.sub(r'(setJavaScriptEnabled\s*\(\s*true\s*\)\s*;)', r'\1\n' + js_bridge, code, count=1)
+                          code = re.sub(
+                              r'(setJavaScriptEnabled\s*\(\s*true\s*\)\s*;)',
+                              lambda m: m.group(1) + "\n" + js_bridge,
+                              code,
+                              count=1
+                          )
 
               with open(java_file, "w", encoding="utf-8") as f:
                   f.write(code)
@@ -1014,6 +1089,7 @@ jobs:
               implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
               implementation("androidx.core:core-splashscreen:1.0.1")
               implementation("androidx.work:work-runtime:2.9.1")
+              implementation("com.google.android.play:app-update:2.1.0")
               implementation("com.google.android.gms:play-services-ads:23.6.0")
               implementation("com.google.android.gms:play-services-auth:21.2.0")
               implementation("com.google.firebase:firebase-messaging:24.1.0")
