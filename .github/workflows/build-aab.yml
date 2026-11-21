@@ -27,12 +27,10 @@ jobs:
 
       - name: Build Zoreno Production v1.1.0 (Code 11)
         run: |
-          # === LIVE ADMOB IDS ===
           ADMOB_APP_ID="ca-app-pub-5825754850490611~6362976717"
           ADMOB_BANNER_ID="ca-app-pub-5825754850490611/8792568001"
           ADMOB_REWARDED_ID="ca-app-pub-5825754850490611/4904670790"
 
-          # 1. Backup root HTML/CSS/JS if present, then extract ZIP
           mkdir -p /tmp/zoreno_latest_backup
           [ -f "index.html" ] && cp -f index.html /tmp/zoreno_latest_backup/index.html || true
           [ -f "app.js" ] && cp -f app.js /tmp/zoreno_latest_backup/app.js || true
@@ -107,7 +105,6 @@ jobs:
           <data-extraction-rules><cloud-backup><include domain="sharedpref" path="."/></cloud-backup></data-extraction-rules>
           EOF
 
-          # 2. Adaptive Icon with 16% Safe-Zone Inset (Fixes Zoomed/Cropped Logo & White Border!)
           rm -f *"("*").webp" *.webp *.kt ic_launcher*.xml
           ICON_SRC="logo.png"
           [ -f "icon.png" ] && ICON_SRC="icon.png" || true
@@ -144,7 +141,6 @@ jobs:
           EOF
           cp -f app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml
 
-          # Transparent 1dp icon so Android 12+ never shows a pink/giant splash logo
           cat << 'EOF' > app/src/main/res/drawable/ic_empty_splash.xml
           <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
               <size android:width="1dp" android:height="1dp"/>
@@ -152,7 +148,6 @@ jobs:
           </shape>
           EOF
 
-          # Crisp White Zoreno Status Bar Notification Icon
           cat << 'EOF' > app/src/main/res/drawable/ic_stat_zoreno.xml
           <vector xmlns:android="http://schemas.android.com/apk/res/android"
               android:width="24dp" android:height="24dp"
@@ -170,7 +165,6 @@ jobs:
             cp -f "$ICON_SRC" app/src/main/assets/splash.png
           fi
 
-          # 3. Closed-App WorkManager Notification Worker (Quoted 'EOF' -> ZERO Escape Bugs!)
           cat << 'EOF' > "app/src/main/java/$PKG_DIR/ZorenoNotifWorker.java"
           package __PKG_NAME__;
           import android.app.NotificationChannel;
@@ -199,13 +193,11 @@ jobs:
               public ZorenoNotifWorker(@NonNull Context context, @NonNull WorkerParameters params) {
                   super(context, params);
               }
-
               @NonNull @Override
               public Result doWork() {
                   checkNewMessages(getApplicationContext());
                   return Result.success();
               }
-
               public static String cleanPreview(String raw) {
                   if (raw == null || raw.trim().isEmpty()) return "New message";
                   String s = raw.trim();
@@ -216,13 +208,11 @@ jobs:
                   String cleaned = s.replaceAll("\\[\\[[^\\]]+\\]\\]", "").trim();
                   return cleaned.isEmpty() ? "New message" : cleaned;
               }
-
               public static void checkNewMessages(Context ctx) {
                   try {
                       SharedPreferences prefs = ctx.getSharedPreferences("ZorenoQuotaPrefs", Context.MODE_PRIVATE);
                       String myUid = prefs.getString("zorenoActiveUid", "");
                       if (myUid == null || myUid.isEmpty()) return;
-
                       URL url = new URL("https://firestore.googleapis.com/v1/projects/zeraai-ans/databases/(default)/documents:runQuery");
                       HttpURLConnection conn = (HttpURLConnection) url.openConnection();
                       conn.setRequestMethod("POST");
@@ -232,7 +222,6 @@ jobs:
                       conn.setDoOutput(true);
                       String q = "{\"structuredQuery\":{\"from\":[{\"collectionId\":\"chats\"}],\"where\":{\"fieldFilter\":{\"field\":{\"fieldPath\":\"participants\"},\"op\":\"ARRAY_CONTAINS\",\"value\":{\"stringValue\":\"" + myUid + "\"}}}}}";
                       try (OutputStream os = conn.getOutputStream()) { os.write(q.getBytes("UTF-8")); }
-
                       if (conn.getResponseCode() == 200) {
                           StringBuilder sb = new StringBuilder();
                           try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), "UTF-8"))) {
@@ -250,7 +239,6 @@ jobs:
                               String lastSenderName = getStr(fields, "lastSenderName");
                               String lastMsg = cleanPreview(getStr(fields, "lastMessage"));
                               long msgTimeMs = getInt(fields, "lastMessageAtMs");
-
                               if (!lastSenderId.isEmpty() && !lastSenderId.equals(myUid) && msgTimeMs > 0) {
                                   String nKey = "bgNotif_" + doc.get("name").getAsString();
                                   long prev = prefs.getLong(nKey, 0L);
@@ -265,7 +253,6 @@ jobs:
                       }
                   } catch (Exception ignored) {}
               }
-
               private static String getStr(JsonObject f, String k) {
                   try { if (f.has(k) && f.getAsJsonObject(k).has("stringValue")) return f.getAsJsonObject(k).get("stringValue").getAsString(); } catch (Exception ignored) {}
                   return "";
@@ -309,7 +296,6 @@ jobs:
           EOF
           sed -i "s/__PKG_NAME__/$PKG_NAME/g" "app/src/main/java/$PKG_DIR/ZorenoNotifWorker.java"
 
-          # 4. Auto-Patch MainActivity.java (with Play Store In-App Auto Update!), app.js & AndroidManifest.xml
           export ADMOB_APP_ID ADMOB_BANNER_ID ADMOB_REWARDED_ID
           python3 - << 'PYEOF'
           import glob, os, re
@@ -318,7 +304,198 @@ jobs:
           banner_id = os.environ.get("ADMOB_BANNER_ID", "ca-app-pub-5825754850490611/8792568001")
           rewarded_id = os.environ.get("ADMOB_REWARDED_ID", "ca-app-pub-5825754850490611/4904670790")
 
-          # --- A. Patch app.js ---
+          # --- A. AUTO-INJECT V101 CSS (ZERO PRO FLASH + CLEAN BANNER BOX) ---
+          v101_css = r"""
+          /* ZV101_BANNER_LOCK */
+          #zorenoAdmobBannerContainer {
+              display: none !important;
+          }
+          body.zv101-show-free-banner #zorenoAdmobBannerContainer {
+              display: flex !important;
+              min-height: 62px !important;
+              height: 62px !important;
+              border-radius: 18px !important;
+              overflow: hidden !important;
+              padding: 0 !important;
+          }
+          body.zv101-ad-loaded #zorenoAdmobBannerContainer .zv89-ad-mount-hint,
+          body.zv101-ad-loaded #zorenoAdmobBannerContainer .zv89-ad-badge-mini {
+              opacity: 0 !important;
+              visibility: hidden !important;
+          }
+          """
+          for css_file in glob.glob("app/src/main/assets/style*.css"):
+              with open(css_file, "r", encoding="utf-8", errors="ignore") as f:
+                  csscode = f.read()
+              if "ZV101_BANNER_LOCK" not in csscode:
+                  csscode = csscode + "\n" + v101_css
+                  with open(css_file, "w", encoding="utf-8") as f:
+                      f.write(csscode)
+
+          # --- B. AUTO-INJECT V101 JS (STRICT HOME-ONLY BANNER + MAPS LINK FIX + GOOGLE LOGIN) ---
+          v101_js = r"""
+          // ZV101_AUTO_PATCH
+          (function initZorenoV101FinalFixes() {
+              let v101TierConfirmed = false;
+
+              function isElVisible(el) {
+                  if (!el) return false;
+                  const st = window.getComputedStyle(el);
+                  if (st.display === "none" || st.visibility === "hidden" || parseFloat(st.opacity || "1") < 0.05) return false;
+                  const r = el.getBoundingClientRect();
+                  return r.width > 10 && r.height > 10;
+              }
+
+              function isAnyOtherScreenOpen() {
+                  const blockers = [
+                      "#activeChatScreen", "#aiChatScreen", "#toolsScreen", "#subScreen",
+                      "#settingsScreen", "#profileScreen", "#friendProfileScreen", "#authScreen",
+                      "#zorenoAccountCenterScreen", "#zorenoV80MyProfileView", "#zorenoV76Profile",
+                      "#zorenoToolPreviewModal", "#zorenoToolExportAdModal", "#forgotPassModal"
+                  ];
+                  for (const sel of blockers) {
+                      if (isElVisible(document.querySelector(sel))) return true;
+                  }
+                  const modals = document.querySelectorAll(".custom-modal-overlay");
+                  for (const m of modals) {
+                      if (isElVisible(m)) return true;
+                  }
+                  return false;
+              }
+
+              function syncV101BannerVisibility() {
+                  const tier = typeof window.getEffectiveTier === "function" ? window.getEffectiveTier() : 0;
+                  const home = document.getElementById("chatListScreen");
+                  const box = document.getElementById("zorenoAdmobBannerContainer");
+                  const homeVis = isElVisible(home);
+                  const blocked = isAnyOtherScreenOpen() || document.body.classList.contains("keyboard-open");
+
+                  if (!v101TierConfirmed || tier > 0) {
+                      document.body.classList.remove("zv101-show-free-banner");
+                      window.AndroidAdMob?.hideHomeBannerAd?.();
+                      return;
+                  }
+
+                  document.body.classList.add("zv101-show-free-banner");
+
+                  if (!homeVis || blocked || !box) {
+                      window.AndroidAdMob?.hideHomeBannerAd?.();
+                      return;
+                  }
+
+                  const r = box.getBoundingClientRect();
+                  if (r.width > 120 && r.height > 40 && r.top >= 20 && r.bottom <= window.innerHeight - 60) {
+                      window.AndroidAdMob?.positionHomeBannerAd?.(
+                          Math.round(r.top),
+                          Math.round(r.left),
+                          Math.round(r.width),
+                          Math.round(r.height)
+                      );
+                  } else {
+                      window.AndroidAdMob?.hideHomeBannerAd?.();
+                  }
+              }
+
+              window.zorenoSyncBannerNow = syncV101BannerVisibility;
+
+              // Confirm Free/Pro from Firestore before ever showing banner
+              const waitAuth = setInterval(() => {
+                  if (typeof auth !== "undefined" && auth && typeof db !== "undefined" && db) {
+                      clearInterval(waitAuth);
+                      auth.onAuthStateChanged(u => {
+                          if (!u?.uid) {
+                              v101TierConfirmed = false;
+                              syncV101BannerVisibility();
+                              return;
+                          }
+                          if (!navigator.onLine) {
+                              v101TierConfirmed = true;
+                              syncV101BannerVisibility();
+                              return;
+                          }
+                          db.collection("users").doc(u.uid).onSnapshot(() => {
+                              v101TierConfirmed = true;
+                              syncV101BannerVisibility();
+                          }, () => {
+                              v101TierConfirmed = true;
+                              syncV101BannerVisibility();
+                          });
+                      });
+                  }
+              }, 300);
+
+              setInterval(syncV101BannerVisibility, 300);
+              window.addEventListener("click", () => setTimeout(syncV101BannerVisibility, 80), true);
+
+              // EXTERNAL GOOGLE MAPS / LOCATION LINK FIX (Never opens broken intent:// inside WebView!)
+              const isExternalMapOrAppUrl = (u) => typeof u === "string" && /google\.com\/maps|maps\.app\.goo\.gl|maps\.google\.|^geo:|^intent:/i.test(u);
+              const _origOpen = window.open;
+              window.open = function (url, target, feats) {
+                  if (isExternalMapOrAppUrl(url) && window.AndroidLinks?.openExternalUrl) {
+                      window.AndroidLinks.openExternalUrl(url);
+                      return null;
+                  }
+                  return _origOpen ? _origOpen.apply(this, arguments) : null;
+              };
+              document.addEventListener("click", (e) => {
+                  const a = e.target?.closest?.("a[href]");
+                  if (a && isExternalMapOrAppUrl(a.href) && window.AndroidLinks?.openExternalUrl) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      window.AndroidLinks.openExternalUrl(a.href);
+                  }
+              }, true);
+
+              // REAL GOOGLE SIGN-IN HANDLER (idToken -> Firebase Auth)
+              window.onZorenoNativeGoogleLogin = async function (email, displayName, idToken) {
+                  try {
+                      if (!idToken || !idToken.trim()) {
+                          showCompactGlassToast?.("", "Add SHA-1 in Firebase Console for Google Login");
+                          return;
+                      }
+                      if (typeof firebase === "undefined" || typeof auth === "undefined" || !auth) {
+                          showCompactGlassToast?.("", "Loading auth, please tap again");
+                          return;
+                      }
+                      showCompactGlassToast?.("", "Signing in with Google...");
+                      const cred = firebase.auth.GoogleAuthProvider.credential(idToken.trim());
+                      const res = await auth.signInWithCredential(cred);
+                      const u = res?.user;
+                      if (!u?.uid) throw new Error("No user returned");
+
+                      const uEmail = (u.email || email || "").trim();
+                      const uName = (u.displayName || displayName || uEmail.split("@")[0] || "Zoreno User").trim();
+
+                      if (typeof db !== "undefined" && db) {
+                          const ref = db.collection("users").doc(u.uid);
+                          const snap = await ref.get();
+                          if (!snap.exists) {
+                              const baseUname = (uName.toLowerCase().replace(/[^a-z0-9]/g, "") || "user") + "_" + Math.floor(1000 + Math.random() * 9000);
+                              await ref.set({
+                                  uid: u.uid, name: uName, email: uEmail, username: baseUname,
+                                  avatar: u.photoURL || "", userTier: 0,
+                                  createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+                                  lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+                              }, { merge: true });
+                          }
+                      }
+
+                      localStorage.setItem("isLoggedIn", "true");
+                      localStorage.setItem("userEmail", uEmail);
+                      localStorage.setItem("userName", uName);
+                      window.AndroidPrefs?.setString?.("zorenoActiveUid", u.uid);
+
+                      const authScr = document.getElementById("authScreen");
+                      if (authScr) authScr.style.setProperty("display", "none", "important");
+                      if (typeof showChatsHome === "function") showChatsHome();
+                      showCompactGlassToast?.("", "Signed in as " + uName);
+                  } catch (err) {
+                      showCompactGlassToast?.("", "Google Login Error: " + (err?.code || err?.message || "Failed"));
+                  }
+              };
+          })();
+          """
+
           for js_file in glob.glob("app/src/main/assets/app*.js"):
               with open(js_file, "r", encoding="utf-8", errors="ignore") as f:
                   jscode = f.read()
@@ -328,16 +505,41 @@ jobs:
                   lambda m: f'let GEMINI_API_KEY = {split_key_expr};',
                   jscode
               )
+              if "ZV101_AUTO_PATCH" not in jscode:
+                  jscode = jscode + "\n" + v101_js
               with open(js_file, "w", encoding="utf-8") as f:
                   f.write(jscode)
 
-          # --- B. Patch MainActivity.java ---
+          # --- C. PATCH MAINACTIVITY.JAVA ---
           for java_file in glob.glob("app/src/main/java/**/MainActivity.java", recursive=True):
               with open(java_file, "r", encoding="utf-8", errors="ignore") as f:
                   code = f.read()
               code = re.sub(r'\.enablePendingPurchases\s*\(\s*\)', '.enablePendingPurchases(com.android.billingclient.api.PendingPurchasesParams.newBuilder().enableOneTimeProducts().build())', code)
               code = re.sub(r'\bproductDetailsList\.isEmpty\s*\(\s*\)', 'productDetailsList.getProductDetailsList().isEmpty()', code)
               code = re.sub(r'\bproductDetailsList\.get\s*\(\s*0\s*\)', 'productDetailsList.getProductDetailsList().get(0)', code)
+
+              # Patch any existing shouldOverrideUrlLoading to open Google Maps / intent:// cleanly in external app
+              def patch_override(m):
+                  sig, var_name = m.group(1), m.group(2)
+                  get_u = f"{var_name}.getUrl().toString()" if "WebResourceRequest" in sig else var_name
+                  return sig + f"""
+                  try {{
+                      String _zu = {get_u};
+                      if (_zu != null && (_zu.startsWith("intent:") || _zu.contains("google.com/maps") || _zu.contains("maps.app.goo.gl") || _zu.startsWith("geo:"))) {{
+                          android.content.Intent _zi = _zu.startsWith("intent:")
+                              ? android.content.Intent.parseUri(_zu, android.content.Intent.URI_INTENT_SCHEME)
+                              : new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(_zu));
+                          _zi.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                          startActivity(_zi);
+                          return true;
+                      }}
+                  }} catch (Exception _ze) {{ return true; }}
+                  """
+              code = re.sub(
+                  r'(public\s+boolean\s+shouldOverrideUrlLoading\s*\(\s*WebView\s+\w+\s*,\s*(?:WebResourceRequest|String)\s+(\w+)\s*\)\s*\{)',
+                  patch_override,
+                  code
+              )
 
               if "class MainActivity" in code:
                   code = re.sub(r'SplashScreen\.installSplashScreen\s*\(\s*this\s*\)\s*;', '', code)
@@ -355,17 +557,17 @@ jobs:
                   private android.media.MediaPlayer zorenoMediaPlayer;
                   private com.google.android.gms.ads.rewarded.RewardedAd zorenoRewardedAd;
                   private boolean zorenoRewardLoading = false;
+                  private android.widget.FrameLayout zorenoBannerHost;
                   private com.google.android.gms.ads.AdView zorenoHomeBannerAd;
-                  private boolean zorenoGoogleTriedFallback = false;
+                  private boolean zorenoBannerLoaded = false;
+                  private int zorenoBannerRetryCount = 0;
 
                   private void checkPlayStoreInAppUpdate() {
                       try {
                           zorenoAppUpdateManager = com.google.android.play.core.appupdate.AppUpdateManagerFactory.create(MainActivity.this);
                           zorenoInstallListener = state -> {
                               if (state.installStatus() == com.google.android.play.core.install.model.InstallStatus.DOWNLOADED) {
-                                  if (zorenoAppUpdateManager != null) {
-                                      zorenoAppUpdateManager.completeUpdate();
-                                  }
+                                  if (zorenoAppUpdateManager != null) zorenoAppUpdateManager.completeUpdate();
                               }
                           };
                           zorenoAppUpdateManager.registerListener(zorenoInstallListener);
@@ -378,16 +580,14 @@ jobs:
                                   if (info.updateAvailability() == com.google.android.play.core.install.model.UpdateAvailability.UPDATE_AVAILABLE) {
                                       if (info.isUpdateTypeAllowed(com.google.android.play.core.install.model.AppUpdateType.FLEXIBLE)) {
                                           zorenoAppUpdateManager.startUpdateFlowForResult(
-                                              info,
-                                              zorenoUpdateLauncher,
+                                              info, zorenoUpdateLauncher,
                                               com.google.android.play.core.appupdate.AppUpdateOptions.newBuilder(
                                                   com.google.android.play.core.install.model.AppUpdateType.FLEXIBLE
                                               ).build()
                                           );
                                       } else if (info.isUpdateTypeAllowed(com.google.android.play.core.install.model.AppUpdateType.IMMEDIATE)) {
                                           zorenoAppUpdateManager.startUpdateFlowForResult(
-                                              info,
-                                              zorenoUpdateLauncher,
+                                              info, zorenoUpdateLauncher,
                                               com.google.android.play.core.appupdate.AppUpdateOptions.newBuilder(
                                                   com.google.android.play.core.install.model.AppUpdateType.IMMEDIATE
                                               ).build()
@@ -431,50 +631,70 @@ jobs:
                   }
 
                   private void ensureHomeBannerAd() {
-                      if (zorenoHomeBannerAd != null) return;
+                      if (zorenoBannerHost != null && zorenoHomeBannerAd != null) return;
                       try {
                           android.view.View root = findViewById(android.R.id.content);
                           if (!(root instanceof android.widget.FrameLayout)) return;
+                          final float d = getResources().getDisplayMetrics().density;
+
+                          zorenoBannerHost = new android.widget.FrameLayout(MainActivity.this);
+                          zorenoBannerHost.setVisibility(android.view.View.GONE);
+                          zorenoBannerHost.setElevation(120f);
+                          zorenoBannerHost.setClipChildren(true);
+                          zorenoBannerHost.setClipToPadding(true);
+                          if (android.os.Build.VERSION.SDK_INT >= 21) {
+                              zorenoBannerHost.setClipToOutline(true);
+                              zorenoBannerHost.setOutlineProvider(new android.view.ViewOutlineProvider() {
+                                  @Override public void getOutline(android.view.View view, android.graphics.Outline outline) {
+                                      outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), 18f * d);
+                                  }
+                              });
+                          }
+
                           zorenoHomeBannerAd = new com.google.android.gms.ads.AdView(MainActivity.this);
                           zorenoHomeBannerAd.setAdUnitId("__BANNER_ID__");
                           zorenoHomeBannerAd.setAdSize(com.google.android.gms.ads.AdSize.BANNER);
-                          zorenoHomeBannerAd.setVisibility(android.view.View.GONE);
-                          zorenoHomeBannerAd.setElevation(120f);
                           zorenoHomeBannerAd.setAdListener(new com.google.android.gms.ads.AdListener() {
                               @Override public void onAdLoaded() {
+                                  zorenoBannerLoaded = true;
+                                  zorenoBannerRetryCount = 0;
                                   runOnUiThread(() -> {
-                                      if (webView != null) webView.evaluateJavascript("var h=document.querySelector('#zorenoAdmobBannerContainer .zv89-ad-mount-hint');if(h)h.style.visibility='hidden';", null);
+                                      if (webView != null) {
+                                          webView.evaluateJavascript("document.body.classList.add('zv101-ad-loaded');if(window.zorenoSyncBannerNow)window.zorenoSyncBannerNow();", null);
+                                      }
                                   });
                               }
+                              @Override public void onAdFailedToLoad(com.google.android.gms.ads.LoadAdError err) {
+                                  zorenoBannerLoaded = false;
+                                  if (zorenoBannerRetryCount < 6 && zorenoHomeBannerAd != null) {
+                                      zorenoBannerRetryCount++;
+                                      new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                                          try {
+                                              if (zorenoHomeBannerAd != null && !zorenoBannerLoaded) {
+                                                  zorenoHomeBannerAd.loadAd(new com.google.android.gms.ads.AdRequest.Builder().build());
+                                              }
+                                          } catch (Exception ignored) {}
+                                      }, 15000);
+                                  }
+                              }
                           });
-                          android.widget.FrameLayout.LayoutParams lp = new android.widget.FrameLayout.LayoutParams(
+
+                          android.widget.FrameLayout.LayoutParams adLp = new android.widget.FrameLayout.LayoutParams(
                               android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
-                              android.widget.FrameLayout.LayoutParams.WRAP_CONTENT
+                              android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                              android.view.Gravity.CENTER
                           );
-                          lp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
-                          ((android.widget.FrameLayout) root).addView(zorenoHomeBannerAd, lp);
-                          zorenoHomeBannerAd.bringToFront();
+                          zorenoBannerHost.addView(zorenoHomeBannerAd, adLp);
+
+                          android.widget.FrameLayout.LayoutParams hostLp = new android.widget.FrameLayout.LayoutParams(
+                              Math.round(320 * d),
+                              Math.round(62 * d)
+                          );
+                          hostLp.gravity = android.view.Gravity.TOP | android.view.Gravity.START;
+                          ((android.widget.FrameLayout) root).addView(zorenoBannerHost, hostLp);
+                          zorenoBannerHost.bringToFront();
                           zorenoHomeBannerAd.loadAd(new com.google.android.gms.ads.AdRequest.Builder().build());
                       } catch (Exception ignored) {}
-                  }
-
-                  private void launchGoogleSignInFlow(boolean withIdToken) {
-                      runOnUiThread(() -> {
-                          try {
-                              com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder b =
-                                  new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
-                                      com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
-                                  ).requestEmail().requestProfile();
-                              if (withIdToken) {
-                                  b.requestIdToken("205788450312-ljp89u7m3q7ptpsad8r2vaga3t3bidj6.apps.googleusercontent.com");
-                              }
-                              com.google.android.gms.auth.api.signin.GoogleSignInClient client =
-                                  com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(MainActivity.this, b.build());
-                              client.signOut().addOnCompleteListener(t -> zorenoGoogleLauncher.launch(client.getSignInIntent()));
-                          } catch (Exception e) {
-                              if (withIdToken) launchGoogleSignInFlow(false);
-                          }
-                      });
                   }
 
                   private void selectBestNaturalVoice(java.util.Locale loc) {
@@ -541,7 +761,6 @@ jobs:
                   try {
                       com.google.android.gms.ads.MobileAds.initialize(this, status -> {
                           loadZorenoRewardedAd("__REWARDED_ID__");
-                          runOnUiThread(this::ensureHomeBannerAd);
                       });
                   } catch (Exception e) {}
 
@@ -595,33 +814,32 @@ jobs:
                   );
 
                   zorenoGoogleLauncher = registerForActivityResult(new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(), result -> {
-                      String email = null, name = null, idToken = null;
                       android.content.Intent data = result.getData();
-                      if (data != null) {
-                          try {
-                              com.google.android.gms.tasks.Task<com.google.android.gms.auth.api.signin.GoogleSignInAccount> task =
-                                  com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(data);
-                              com.google.android.gms.auth.api.signin.GoogleSignInAccount acct =
-                                  task.getResult(com.google.android.gms.common.api.ApiException.class);
-                              if (acct != null) { email = acct.getEmail(); name = acct.getDisplayName(); idToken = acct.getIdToken(); }
-                          } catch (com.google.android.gms.common.api.ApiException ex) {
-                              if (!zorenoGoogleTriedFallback && ex.getStatusCode() == 10) {
-                                  zorenoGoogleTriedFallback = true;
-                                  launchGoogleSignInFlow(false);
-                                  return;
-                              }
-                          } catch (Exception ex) {}
-                      }
-                      if (email != null && !email.isEmpty()) {
-                          zorenoGoogleTriedFallback = false;
-                          if (name == null || name.isEmpty()) name = email.split("@")[0];
-                          final String sE = email.replace("'", "\\'");
-                          final String sN = name.replace("'", "\\'");
-                          final String sT = idToken != null ? idToken.replace("'", "\\'") : "";
-                          runOnUiThread(() -> {
-                              if (webView != null) webView.evaluateJavascript("if(window.onZorenoNativeGoogleLogin){window.onZorenoNativeGoogleLogin('" + sE + "','" + sN + "','" + sT + "');}", null);
-                          });
-                      }
+                      if (data == null) return;
+                      try {
+                          com.google.android.gms.tasks.Task<com.google.android.gms.auth.api.signin.GoogleSignInAccount> task =
+                              com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(data);
+                          com.google.android.gms.auth.api.signin.GoogleSignInAccount acct =
+                              task.getResult(com.google.android.gms.common.api.ApiException.class);
+                          if (acct != null && acct.getEmail() != null) {
+                              String email = acct.getEmail();
+                              String name = acct.getDisplayName() != null ? acct.getDisplayName() : email.split("@")[0];
+                              String idToken = acct.getIdToken() != null ? acct.getIdToken() : "";
+                              final String sE = email.replace("'", "\\'");
+                              final String sN = name.replace("'", "\\'");
+                              final String sT = idToken.replace("'", "\\'");
+                              runOnUiThread(() -> {
+                                  if (webView != null) {
+                                      webView.evaluateJavascript("if(window.onZorenoNativeGoogleLogin){window.onZorenoNativeGoogleLogin('" + sE + "','" + sN + "','" + sT + "');}", null);
+                                  }
+                              });
+                          }
+                      } catch (com.google.android.gms.common.api.ApiException ex) {
+                          int codeNum = ex.getStatusCode();
+                          if (codeNum != 12501) {
+                              runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "Google Sign-In Error " + codeNum + ": Add SHA-1 in Firebase Console", android.widget.Toast.LENGTH_LONG).show());
+                          }
+                      } catch (Exception ignored) {}
                   });
                   """.replace("__REWARDED_ID__", rewarded_id)
 
@@ -673,9 +891,7 @@ jobs:
 
                       @Override
                       public boolean onShowFileChooser(android.webkit.WebView wv, android.webkit.ValueCallback<android.net.Uri[]> filePathCallback, FileChooserParams params) {
-                          if (zorenoFilePathCallback != null) {
-                              zorenoFilePathCallback.onReceiveValue(null);
-                          }
+                          if (zorenoFilePathCallback != null) zorenoFilePathCallback.onReceiveValue(null);
                           zorenoFilePathCallback = filePathCallback;
                           try {
                               if (params.isCaptureEnabled()) {
@@ -702,6 +918,21 @@ jobs:
                           }
                       }
                   });
+
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
+                      public void openExternalUrl(String url) {
+                          runOnUiThread(() -> {
+                              try {
+                                  android.content.Intent i = url.startsWith("intent:")
+                                      ? android.content.Intent.parseUri(url, android.content.Intent.URI_INTENT_SCHEME)
+                                      : new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url));
+                                  i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                                  startActivity(i);
+                              } catch (Exception ignored) {}
+                          });
+                      }
+                  }, "AndroidLinks");
 
                   webView.addJavascriptInterface(new Object() {
                       @android.webkit.JavascriptInterface
@@ -741,8 +972,21 @@ jobs:
                       public void signIn() { startGoogleLogin(); }
                       @android.webkit.JavascriptInterface
                       public void startGoogleLogin() {
-                          zorenoGoogleTriedFallback = false;
-                          launchGoogleSignInFlow(true);
+                          runOnUiThread(() -> {
+                              try {
+                                  com.google.android.gms.auth.api.signin.GoogleSignInOptions gso =
+                                      new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+                                          com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
+                                      )
+                                      .requestIdToken("205788450312-ljp89u7m3q7ptpsad8r2vaga3t3bidj6.apps.googleusercontent.com")
+                                      .requestEmail()
+                                      .requestProfile()
+                                      .build();
+                                  com.google.android.gms.auth.api.signin.GoogleSignInClient client =
+                                      com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(MainActivity.this, gso);
+                                  client.signOut().addOnCompleteListener(t -> zorenoGoogleLauncher.launch(client.getSignInIntent()));
+                              } catch (Exception e) {}
+                          });
                       }
                   }, "ZorenoGoogleAuth");
 
@@ -771,27 +1015,44 @@ jobs:
                           runOnUiThread(() -> {
                               try {
                                   ensureHomeBannerAd();
-                                  if (zorenoHomeBannerAd == null) return;
+                                  if (zorenoBannerHost == null || zorenoHomeBannerAd == null || webView == null) return;
+                                  android.view.View root = findViewById(android.R.id.content);
+                                  if (root == null) return;
                                   float d = getResources().getDisplayMetrics().density;
+                                  int[] wvLoc = new int[2];
+                                  int[] rtLoc = new int[2];
+                                  webView.getLocationInWindow(wvLoc);
+                                  root.getLocationInWindow(rtLoc);
+                                  int offX = wvLoc[0] - rtLoc[0] - root.getPaddingLeft();
+                                  int offY = wvLoc[1] - rtLoc[1] - root.getPaddingTop();
+
                                   int boxW = Math.round(widthCss * d);
                                   int boxH = Math.round(heightCss * d);
                                   int adW = Math.round(320 * d);
-                                  int adH = Math.round(50 * d);
-                                  int x = Math.round(leftCss * d) + Math.max(0, (boxW - adW) / 2);
-                                  int y = Math.round(topCss * d) + Math.max(0, (boxH - adH) / 2);
-                                  android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) zorenoHomeBannerAd.getLayoutParams();
-                                  lp.leftMargin = x;
-                                  lp.topMargin = y;
-                                  zorenoHomeBannerAd.setLayoutParams(lp);
-                                  zorenoHomeBannerAd.bringToFront();
-                                  zorenoHomeBannerAd.setVisibility(android.view.View.VISIBLE);
+                                  if (boxW > 0 && boxW < adW) {
+                                      float sc = (float) boxW / (float) adW;
+                                      zorenoHomeBannerAd.setScaleX(sc);
+                                      zorenoHomeBannerAd.setScaleY(sc);
+                                  } else {
+                                      zorenoHomeBannerAd.setScaleX(1f);
+                                      zorenoHomeBannerAd.setScaleY(1f);
+                                  }
+
+                                  android.widget.FrameLayout.LayoutParams lp = (android.widget.FrameLayout.LayoutParams) zorenoBannerHost.getLayoutParams();
+                                  lp.width = boxW;
+                                  lp.height = boxH;
+                                  lp.leftMargin = offX + Math.round(leftCss * d);
+                                  lp.topMargin = offY + Math.round(topCss * d);
+                                  zorenoBannerHost.setLayoutParams(lp);
+                                  zorenoBannerHost.bringToFront();
+                                  zorenoBannerHost.setVisibility(zorenoBannerLoaded ? android.view.View.VISIBLE : android.view.View.GONE);
                               } catch (Exception ignored) {}
                           });
                       }
                       @android.webkit.JavascriptInterface
                       public void hideHomeBannerAd() {
                           runOnUiThread(() -> {
-                              if (zorenoHomeBannerAd != null) zorenoHomeBannerAd.setVisibility(android.view.View.GONE);
+                              if (zorenoBannerHost != null) zorenoBannerHost.setVisibility(android.view.View.GONE);
                           });
                       }
                       @android.webkit.JavascriptInterface
@@ -940,24 +1201,13 @@ jobs:
 
                   if "ZorenoGoogleAuth" not in code:
                       if "webView.loadUrl(" in code:
-                          code = re.sub(
-                              r'(webView\.loadUrl\s*\()',
-                              lambda m: js_bridge + "\n" + m.group(1),
-                              code,
-                              count=1
-                          )
+                          code = re.sub(r'(webView\.loadUrl\s*\()', lambda m: js_bridge + "\n" + m.group(1), code, count=1)
                       else:
-                          code = re.sub(
-                              r'(setJavaScriptEnabled\s*\(\s*true\s*\)\s*;)',
-                              lambda m: m.group(1) + "\n" + js_bridge,
-                              code,
-                              count=1
-                          )
+                          code = re.sub(r'(setJavaScriptEnabled\s*\(\s*true\s*\)\s*;)', lambda m: m.group(1) + "\n" + js_bridge, code, count=1)
 
               with open(java_file, "w", encoding="utf-8") as f:
                   f.write(code)
 
-          # --- C. Safely Patch AndroidManifest.xml (Zero Duplicate Permissions) ---
           if os.path.exists("AndroidManifest.xml"):
               with open("AndroidManifest.xml", "r", encoding="utf-8", errors="ignore") as f:
                   mf = f.read()
@@ -1000,7 +1250,6 @@ jobs:
                   f.write(mf)
           PYEOF
 
-          # 5. Clean Theme (Dark Status Bar + No Pink Stretched Splash!)
           rm -f app/src/main/res/values/styles.xml
           cat << 'EOF' > app/src/main/res/values/themes.xml
           <resources xmlns:tools="http://schemas.android.com/tools">
@@ -1019,7 +1268,6 @@ jobs:
           cp app/src/main/res/values/themes.xml app/src/main/res/values-night/themes.xml
           cp app/src/main/res/values/themes.xml app/src/main/res/values-v31/themes.xml
 
-          # 6. Keystore + Print SHA-1 Fingerprint for Firebase Google Sign-In
           if [ -f "zoreno-release-key.jks" ]; then
             cp zoreno-release-key.jks app/zoreno-release-key.jks
           else
