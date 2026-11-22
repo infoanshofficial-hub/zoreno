@@ -1,4 +1,4 @@
-name: Build Zoreno Android AAB & APK (v1.2.0 - Code 12)
+name: Build Zoreno Android AAB & APK (v1.3.0 - Code 13)
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
           gradle-version: '8.9'
           cache-disabled: true
 
-      - name: Build Zoreno Production v1.2.0 (Code 12)
+      - name: Build Zoreno Production v1.3.0 (Code 13)
         run: |
           ADMOB_APP_ID="ca-app-pub-5825754850490611~6362976717"
           ADMOB_BANNER_ID="ca-app-pub-5825754850490611/8792568001"
@@ -305,7 +305,6 @@ jobs:
           banner_id = os.environ.get("ADMOB_BANNER_ID", "ca-app-pub-5825754850490611/8792568001")
           rewarded_id = os.environ.get("ADMOB_REWARDED_ID", "ca-app-pub-5825754850490611/4904670790")
 
-          # --- A. CLEAN BANNER BOX + BALANCED AUTH SCREEN BOTTOM GAP ---
           v105_css = r"""
           /* ZV105_CLEAN_NATIVE_BANNER_AND_AUTH */
           #zorenoAdmobBannerContainer,
@@ -345,7 +344,6 @@ jobs:
                   with open(css_file, "w", encoding="utf-8") as f:
                       f.write(csscode)
 
-          # --- B. ZERO 0.2s POP ON CHAT OPEN + CLEAN TOOL DOWNLOAD + HIDE GOOGLE BTN ---
           v105_js = r"""
           // ZV105_AUTO_PATCH
           (function initZorenoV105FinalFixes() {
@@ -1383,7 +1381,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: zoreno-v1.2.0-final-release
+          name: zoreno-v1.3.0-final-release
           path: |
             app/build/outputs/apk/**/*.apk
             app/build/outputs/bundle/**/*.aab
