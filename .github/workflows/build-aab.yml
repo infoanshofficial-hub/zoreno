@@ -1,4 +1,4 @@
-name: Build Zoreno Android AAB & APK (v1.3.0 - Code 13)
+name: Build Zoreno Android AAB & APK (v1.4.0 - Code 14)
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
           gradle-version: '8.9'
           cache-disabled: true
 
-      - name: Build Zoreno Production v1.3.0 (Code 13)
+      - name: Build Zoreno Production v1.4.0 (Code 14)
         run: |
           ADMOB_APP_ID="ca-app-pub-5825754850490611~6362976717"
           ADMOB_BANNER_ID="ca-app-pub-5825754850490611/8792568001"
@@ -200,14 +200,13 @@ jobs:
                   return Result.success();
               }
               public static String cleanPreview(String raw) {
-                  if (raw == null || raw.trim().isEmpty()) return "New message";
+                  if (raw == null || raw.trim().isEmpty()) return "";
                   String s = raw.trim();
-                  if (s.contains("[[ANIM3D:") || s.contains("[[SVG3D:") || s.contains("[[STICKER") || s.contains("[[NEON")) return "✨ Sent a 3D Sticker";
-                  if (s.contains("[[VOICE:")) return "🎤 Voice Note";
-                  if (s.contains("[[LOC:")) return "📍 Shared a Location";
-                  if (s.contains("[[MEMORY:")) return "🤝 Agreement Card";
-                  String cleaned = s.replaceAll("\\[\\[[^\\]]+\\]\\]", "").trim();
-                  return cleaned.isEmpty() ? "New message" : cleaned;
+                  if (s.contains("[[ANIM3D:") || s.contains("[[SVG3D:") || s.contains("[[STICKER") || s.contains("[[NEON")) return "Sent a 3D Sticker";
+                  if (s.contains("[[VOICE:")) return "Voice Note";
+                  if (s.contains("[[LOC:")) return "Shared a Location";
+                  if (s.contains("[[MEMORY:")) return "Agreement Card";
+                  return s.replaceAll("\\[\\[[^\\]]+\\]\\]", "").trim();
               }
               public static void checkNewMessages(Context ctx) {
                   try {
@@ -240,7 +239,7 @@ jobs:
                               String lastSenderName = getStr(fields, "lastSenderName");
                               String lastMsg = cleanPreview(getStr(fields, "lastMessage"));
                               long msgTimeMs = getInt(fields, "lastMessageAtMs");
-                              if (!lastSenderId.isEmpty() && !lastSenderId.equals(myUid) && msgTimeMs > 0) {
+                              if (!lastSenderId.isEmpty() && !lastSenderId.equals(myUid) && !lastMsg.isEmpty() && msgTimeMs > 0) {
                                   String nKey = "bgNotif_" + doc.get("name").getAsString();
                                   long prev = prefs.getLong(nKey, 0L);
                                   if (prev == 0L) {
@@ -305,232 +304,7 @@ jobs:
           banner_id = os.environ.get("ADMOB_BANNER_ID", "ca-app-pub-5825754850490611/8792568001")
           rewarded_id = os.environ.get("ADMOB_REWARDED_ID", "ca-app-pub-5825754850490611/4904670790")
 
-          v105_css = r"""
-          /* ZV105_CLEAN_NATIVE_BANNER_AND_AUTH */
-          #zorenoAdmobBannerContainer,
-          body.zv105-home-free-banner #zorenoAdmobBannerContainer {
-              display: none !important;
-              visibility: hidden !important;
-              height: 0 !important;
-              min-height: 0 !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              border: none !important;
-              background: transparent !important;
-              box-shadow: none !important;
-          }
-          #authScreen {
-              min-height: 100dvh !important;
-              height: 100dvh !important;
-              display: flex !important;
-              flex-direction: column !important;
-              justify-content: space-between !important;
-              padding-top: 22px !important;
-              padding-bottom: 28px !important;
-              box-sizing: border-box !important;
-          }
-          #authScreen .auth-card,
-          #authScreen form {
-              margin-top: auto !important;
-              margin-bottom: auto !important;
-          }
-          """
-          for css_file in glob.glob("app/src/main/assets/style*.css"):
-              with open(css_file, "r", encoding="utf-8", errors="ignore") as f:
-                  csscode = f.read()
-              csscode = re.sub(r'/\* ZV103_RECT_BANNER_CONTAINER \*/.*?\*/', '', csscode, flags=re.S)
-              if "ZV105_CLEAN_NATIVE_BANNER_AND_AUTH" not in csscode:
-                  csscode = csscode + "\n" + v105_css
-                  with open(css_file, "w", encoding="utf-8") as f:
-                      f.write(csscode)
-
-          v105_js = r"""
-          // ZV105_AUTO_PATCH
-          (function initZorenoV105FinalFixes() {
-              let v105TierConfirmed = false;
-
-              function isReallyVisible(el) {
-                  if (!el) return false;
-                  const st = window.getComputedStyle(el);
-                  if (st.display === "none" || st.visibility === "hidden" || parseFloat(st.opacity || "1") < 0.05) return false;
-                  const r = el.getBoundingClientRect();
-                  return r.width > 20 && r.height > 20;
-              }
-
-              function isAnySubScreenOpen() {
-                  const subIds = [
-                      "activeChatScreen", "aiChatScreen", "toolsScreen", "subScreen",
-                      "settingsScreen", "profileScreen", "friendProfileScreen", "authScreen",
-                      "zorenoAccountCenterScreen", "zorenoV80MyProfileView", "zorenoV76Profile",
-                      "zorenoToolPreviewModal", "zorenoToolExportAdModal", "forgotPassModal"
-                  ];
-                  for (const id of subIds) {
-                      if (isReallyVisible(document.getElementById(id))) return true;
-                  }
-                  const overlays = document.querySelectorAll(".custom-modal-overlay");
-                  for (const ov of overlays) {
-                      if (isReallyVisible(ov)) return true;
-                  }
-                  return false;
-              }
-
-              function hideBannerHard() {
-                  document.body?.classList?.remove("zv105-home-free-banner");
-                  try { window.AndroidAdMob?.hideHomeBannerAd?.(); } catch (e) {}
-              }
-
-              function syncV105Banner() {
-                  const tier = typeof window.getEffectiveTier === "function" ? window.getEffectiveTier() : 0;
-                  const home = document.getElementById("chatListScreen");
-                  const onChatsTab = isReallyVisible(home) && !isAnySubScreenOpen() && !document.body.classList.contains("keyboard-open");
-
-                  if (!v105TierConfirmed || tier > 0 || !onChatsTab) {
-                      hideBannerHard();
-                      return;
-                  }
-
-                  const anchor = document.querySelector(".focus-sprint-card");
-                  const tabs = document.querySelector(".chat-tabs");
-                  if (!anchor || !tabs) {
-                      hideBannerHard();
-                      return;
-                  }
-
-                  const aRect = anchor.getBoundingClientRect();
-                  const tRect = tabs.getBoundingClientRect();
-                  const gapTop = aRect.bottom + 8;
-                  const gapBottom = tRect.top - 8;
-                  const boxH = Math.min(58, Math.max(46, Math.round(gapBottom - gapTop)));
-                  const boxW = Math.min(Math.round(aRect.width), Math.round(window.innerWidth - 24));
-                  const boxLeft = Math.round((window.innerWidth - boxW) / 2);
-                  const boxTop = Math.round(gapTop + Math.max(0, (gapBottom - gapTop - boxH) / 2));
-
-                  if (boxW > 140 && boxH >= 44 && boxTop >= 20 && (boxTop + boxH) <= window.innerHeight - 60) {
-                      document.body.classList.add("zv105-home-free-banner");
-                      window.AndroidAdMob?.positionHomeBannerAd?.(boxTop, boxLeft, boxW, boxH);
-                  } else {
-                      hideBannerHard();
-                  }
-              }
-
-              window.zorenoSyncBannerNow = syncV105Banner;
-
-              document.addEventListener("pointerdown", () => {
-                  hideBannerHard();
-              }, true);
-              document.addEventListener("click", () => {
-                  hideBannerHard();
-                  setTimeout(syncV105Banner, 220);
-              }, true);
-
-              setInterval(syncV105Banner, 350);
-
-              const waitAuth = setInterval(() => {
-                  if (typeof auth !== "undefined" && auth && typeof db !== "undefined" && db) {
-                      clearInterval(waitAuth);
-                      auth.onAuthStateChanged(u => {
-                          if (!u?.uid) {
-                              v105TierConfirmed = false;
-                              hideBannerHard();
-                              return;
-                          }
-                          if (!navigator.onLine) {
-                              v105TierConfirmed = true;
-                              syncV105Banner();
-                              return;
-                          }
-                          db.collection("users").doc(u.uid).onSnapshot(() => {
-                              v105TierConfirmed = true;
-                              syncV105Banner();
-                          }, () => {
-                              v105TierConfirmed = true;
-                              syncV105Banner();
-                          });
-                      });
-                  }
-              }, 300);
-
-              window._zv105ToolExportContext = false;
-              document.addEventListener("click", (e) => {
-                  if (e.target?.closest?.("#ztWatchExportAdBtn")) {
-                      window._zv105ToolExportContext = true;
-                  } else if (e.target?.closest?.("[id*='ai'], [class*='ai-'], [id*='quota'], [id*='unlock']")) {
-                      window._zv105ToolExportContext = false;
-                  }
-              }, true);
-
-              const _origRewardGranted = window.onAdMobRewardGranted;
-              window.onAdMobRewardGranted = function () {
-                  const modal = document.getElementById("zorenoToolExportAdModal");
-                  if (modal) modal.style.display = "none";
-                  const exportBtn = document.getElementById("ztWatchExportAdBtn");
-                  if (exportBtn) {
-                      exportBtn.disabled = false;
-                      exportBtn.innerHTML = `<i class="fa-solid fa-circle-play"></i> <span>Watch Ad to Export</span>`;
-                  }
-                  if (typeof _origRewardGranted === "function") {
-                      try { _origRewardGranted.apply(this, arguments); } catch (e) {}
-                  }
-                  if (window._zv105ToolExportContext) {
-                      window._zv105ToolExportContext = false;
-                      setTimeout(() => {
-                          const dlBtn = document.querySelector("#ztoolDynamicWorkspace [id*='download' i], #ztoolDynamicWorkspace [id*='export' i], #ztoolDynamicWorkspace [id*='save' i], #ztoolDynamicWorkspace button[onclick*='download' i], #ztoolDynamicWorkspace button[onclick*='save' i], #ztoolDynamicWorkspace button[onclick*='export' i]");
-                          if (dlBtn && !dlBtn.disabled) dlBtn.click();
-                      }, 180);
-                  }
-              };
-
-              const _origToast = window.showCompactGlassToast;
-              if (typeof _origToast === "function") {
-                  window.showCompactGlassToast = function (title, msg) {
-                      const toolsOpen = isReallyVisible(document.getElementById("toolsScreen"));
-                      if (toolsOpen && /\+\s*3\s*chat/i.test(String(msg || ""))) return;
-                      return _origToast.apply(this, arguments);
-                  };
-              }
-
-              const isExternalMapOrAppUrl = (u) => typeof u === "string" && /google\.com\/maps|maps\.app\.goo\.gl|maps\.google\.|^geo:|^intent:/i.test(u);
-              const _origOpen = window.open;
-              window.open = function (url, target, feats) {
-                  if (isExternalMapOrAppUrl(url) && window.AndroidLinks?.openExternalUrl) {
-                      window.AndroidLinks.openExternalUrl(url);
-                      return null;
-                  }
-                  return _origOpen ? _origOpen.apply(this, arguments) : null;
-              };
-              document.addEventListener("click", (e) => {
-                  const a = e.target?.closest?.("a[href]");
-                  if (a && isExternalMapOrAppUrl(a.href) && window.AndroidLinks?.openExternalUrl) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      window.AndroidLinks.openExternalUrl(a.href);
-                  }
-              }, true);
-
-              function hideGoogleBtns() {
-                  const nodes = document.querySelectorAll("button, a, div, span");
-                  for (const el of nodes) {
-                      const txt = (el.textContent || "").trim().toLowerCase();
-                      if (txt === "continue with google" || txt === "sign in with google") {
-                          const target = el.closest("button") || el;
-                          target.style.setProperty("display", "none", "important");
-                          const prev = target.previousElementSibling;
-                          if (prev && (prev.textContent || "").trim().toLowerCase() === "or") {
-                              prev.style.setProperty("display", "none", "important");
-                          }
-                      }
-                  }
-              }
-              window.addEventListener("DOMContentLoaded", hideGoogleBtns);
-              setTimeout(hideGoogleBtns, 400);
-              setTimeout(hideGoogleBtns, 1500);
-              new MutationObserver(hideGoogleBtns).observe(document.body || document.documentElement, {
-                  childList: true,
-                  subtree: true
-              });
-          })();
-          """
-
+          # Only inject default split API key (Zero UI/CSS/JS hacks in YAML!)
           for js_file in glob.glob("app/src/main/assets/app*.js"):
               with open(js_file, "r", encoding="utf-8", errors="ignore") as f:
                   jscode = f.read()
@@ -540,9 +314,6 @@ jobs:
                   lambda m: f'let GEMINI_API_KEY = {split_key_expr};',
                   jscode
               )
-              jscode = re.sub(r'// ZV103_AUTO_PATCH.*', '', jscode, flags=re.S)
-              if "ZV105_AUTO_PATCH" not in jscode:
-                  jscode = jscode + "\n" + v105_js
               with open(js_file, "w", encoding="utf-8") as f:
                   f.write(jscode)
 
@@ -559,7 +330,7 @@ jobs:
                   return sig + f"""
                   try {{
                       String _zu = {get_u};
-                      if (_zu != null && (_zu.startsWith("intent:") || _zu.contains("google.com/maps") || _zu.contains("maps.app.goo.gl") || _zu.startsWith("geo:"))) {{
+                      if (_zu != null && (_zu.startsWith("intent:") || _zu.contains("google.com/maps") || _zu.contains("maps.app.goo.gl") || _zu.startsWith("geo:") || _zu.contains("tokoplatforms.in"))) {{
                           android.content.Intent _zi = _zu.startsWith("intent:")
                               ? android.content.Intent.parseUri(_zu, android.content.Intent.URI_INTENT_SCHEME)
                               : new android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(_zu));
@@ -579,7 +350,6 @@ jobs:
                   code = re.sub(r'SplashScreen\.installSplashScreen\s*\(\s*this\s*\)\s*;', '', code)
 
                   extra_fields = r"""
-                  private androidx.activity.result.ActivityResultLauncher<android.content.Intent> zorenoGoogleLauncher;
                   private androidx.activity.result.ActivityResultLauncher<android.content.Intent> zorenoFileChooserLauncher;
                   private androidx.activity.result.ActivityResultLauncher<androidx.activity.result.IntentSenderRequest> zorenoUpdateLauncher;
                   private com.google.android.play.core.appupdate.AppUpdateManager zorenoAppUpdateManager;
@@ -595,6 +365,8 @@ jobs:
                   private com.google.android.gms.ads.AdView zorenoHomeBannerAd;
                   private boolean zorenoBannerLoaded = false;
                   private int zorenoBannerRetryCount = 0;
+                  private int zorenoSafeTopCss = 0;
+                  private int zorenoSafeBottomCss = 0;
 
                   private void checkPlayStoreInAppUpdate() {
                       try {
@@ -676,11 +448,12 @@ jobs:
                           zorenoBannerHost.setElevation(120f);
                           zorenoBannerHost.setClipChildren(true);
                           zorenoBannerHost.setClipToPadding(true);
-                          android.graphics.drawable.GradientDrawable borderBg = new android.graphics.drawable.GradientDrawable();
-                          borderBg.setColor(android.graphics.Color.TRANSPARENT);
-                          borderBg.setCornerRadius(4f * d);
-                          borderBg.setStroke(Math.max(1, Math.round(1f * d)), android.graphics.Color.parseColor("#5994A3B8"));
-                          zorenoBannerHost.setBackground(borderBg);
+                          android.graphics.drawable.GradientDrawable darkBg = new android.graphics.drawable.GradientDrawable();
+                          darkBg.setColor(android.graphics.Color.parseColor("#0B1020"));
+                          darkBg.setCornerRadius(10f * d);
+                          darkBg.setStroke(Math.max(1, Math.round(1f * d)), android.graphics.Color.parseColor("#3394A3B8"));
+                          zorenoBannerHost.setBackground(darkBg);
+                          zorenoBannerHost.setClipToOutline(true);
 
                           zorenoHomeBannerAd = new com.google.android.gms.ads.AdView(MainActivity.this);
                           zorenoHomeBannerAd.setAdUnitId("__BANNER_ID__");
@@ -739,7 +512,7 @@ jobs:
                   }
                   """.replace("__BANNER_ID__", banner_id).replace("__REWARDED_ID__", rewarded_id)
 
-                  if "zorenoGoogleLauncher" not in code:
+                  if "zorenoFileChooserLauncher" not in code:
                       code = re.sub(
                           r'(class\s+MainActivity\s+extends\s+[^{]+\{)',
                           lambda m: m.group(1) + "\n" + extra_fields,
@@ -749,26 +522,35 @@ jobs:
 
                   inset_code = r"""
                   setVolumeControlStream(android.media.AudioManager.STREAM_MUSIC);
-                  androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(), true);
-                  getWindow().setStatusBarColor(android.graphics.Color.parseColor("#0F172A"));
-                  getWindow().setNavigationBarColor(android.graphics.Color.parseColor("#0F172A"));
+                  // True Edge-to-Edge Full Screen (WhatsApp / YouTube / Gemini Style)
+                  androidx.core.view.WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+                  getWindow().setStatusBarColor(android.graphics.Color.TRANSPARENT);
+                  getWindow().setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+                  if (android.os.Build.VERSION.SDK_INT >= 28) {
+                      android.view.WindowManager.LayoutParams wlp = getWindow().getAttributes();
+                      wlp.layoutInDisplayCutoutMode = android.view.WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                      getWindow().setAttributes(wlp);
+                  }
                   androidx.core.view.WindowInsetsControllerCompat icCtrl =
                       androidx.core.view.WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
                   if (icCtrl != null) {
-                      icCtrl.setAppearanceLightStatusBars(false);
-                      icCtrl.setAppearanceLightNavigationBars(false);
+                      icCtrl.setAppearanceLightStatusBars(true);
+                      icCtrl.setAppearanceLightNavigationBars(true);
                   }
 
                   android.view.View rootV = findViewById(android.R.id.content);
                   if (rootV != null) {
-                      rootV.setBackgroundColor(android.graphics.Color.parseColor("#0F172A"));
                       androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(rootV, (v, insets) -> {
-                          androidx.core.graphics.Insets bars = insets.getInsets(
-                              androidx.core.view.WindowInsetsCompat.Type.systemBars() |
-                              androidx.core.view.WindowInsetsCompat.Type.ime()
-                          );
-                          v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
-                          return androidx.core.view.WindowInsetsCompat.CONSUMED;
+                          androidx.core.graphics.Insets sysBars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars());
+                          androidx.core.graphics.Insets ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime());
+                          float d = getResources().getDisplayMetrics().density;
+                          zorenoSafeTopCss = Math.round(sysBars.top / Math.max(1f, d));
+                          zorenoSafeBottomCss = Math.round(sysBars.bottom / Math.max(1f, d));
+                          v.setPadding(0, 0, 0, Math.max(0, ime.bottom));
+                          if (webView != null) {
+                              webView.evaluateJavascript("if(window.applyNativeSafeInsets)window.applyNativeSafeInsets(" + zorenoSafeTopCss + "," + zorenoSafeBottomCss + ");", null);
+                          }
+                          return insets;
                       });
                   }
 
@@ -777,6 +559,21 @@ jobs:
                           androidx.core.app.ActivityCompat.requestPermissions(this, new String[]{"android.permission.POST_NOTIFICATIONS"}, 101);
                       }
                   }
+
+                  try {
+                      if (android.os.Build.VERSION.SDK_INT >= 23) {
+                          android.content.SharedPreferences bp = getSharedPreferences("ZorenoQuotaPrefs", MODE_PRIVATE);
+                          if (!bp.getBoolean("bgBatteryPrompted", false)) {
+                              android.os.PowerManager pm = (android.os.PowerManager) getSystemService(POWER_SERVICE);
+                              if (pm != null && !pm.isIgnoringBatteryOptimizations(getPackageName())) {
+                                  bp.edit().putBoolean("bgBatteryPrompted", true).apply();
+                                  android.content.Intent bi = new android.content.Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+                                  bi.setData(android.net.Uri.parse("package:" + getPackageName()));
+                                  startActivity(bi);
+                              }
+                          }
+                      }
+                  } catch (Exception ignored) {}
 
                   try {
                       androidx.work.Constraints cons = new androidx.work.Constraints.Builder()
@@ -802,16 +599,19 @@ jobs:
                       }
                   });
 
+                  // Side Swipe & Back Button -> Always go back inside app first; Double-Back on Home to exit!
                   getOnBackPressedDispatcher().addCallback(this, new androidx.activity.OnBackPressedCallback(true) {
                       @Override public void handleOnBackPressed() {
                           if (zorenoBannerHost != null) zorenoBannerHost.setVisibility(android.view.View.GONE);
                           if (webView != null) {
                               webView.evaluateJavascript("(window.handleZorenoHardwareBack && window.handleZorenoHardwareBack()) ? 'HANDLED' : 'EXIT'", res -> {
                                   if (res == null || !res.contains("HANDLED")) {
-                                      if (webView.canGoBack()) webView.goBack(); else moveTaskToBack(true);
+                                      moveTaskToBack(true);
                                   }
                               });
-                          } else { moveTaskToBack(true); }
+                          } else {
+                              moveTaskToBack(true);
+                          }
                       }
                   });
 
@@ -844,33 +644,9 @@ jobs:
                           zorenoCameraPhotoUri = null;
                       }
                   );
-
-                  zorenoGoogleLauncher = registerForActivityResult(new androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult(), result -> {
-                      android.content.Intent data = result.getData();
-                      if (data == null) return;
-                      try {
-                          com.google.android.gms.tasks.Task<com.google.android.gms.auth.api.signin.GoogleSignInAccount> task =
-                              com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(data);
-                          com.google.android.gms.auth.api.signin.GoogleSignInAccount acct =
-                              task.getResult(com.google.android.gms.common.api.ApiException.class);
-                          if (acct != null && acct.getEmail() != null) {
-                              String email = acct.getEmail();
-                              String name = acct.getDisplayName() != null ? acct.getDisplayName() : email.split("@")[0];
-                              String idToken = acct.getIdToken() != null ? acct.getIdToken() : "";
-                              final String sE = email.replace("'", "\\'");
-                              final String sN = name.replace("'", "\\'");
-                              final String sT = idToken.replace("'", "\\'");
-                              runOnUiThread(() -> {
-                                  if (webView != null) {
-                                      webView.evaluateJavascript("if(window.onZorenoNativeGoogleLogin){window.onZorenoNativeGoogleLogin('" + sE + "','" + sN + "','" + sT + "');}", null);
-                                  }
-                              });
-                          }
-                      } catch (Exception ignored) {}
-                  });
                   """.replace("__REWARDED_ID__", rewarded_id)
 
-                  if "zorenoGoogleLauncher = registerForActivityResult" not in code:
+                  if "zorenoFileChooserLauncher = registerForActivityResult" not in code:
                       code = re.sub(
                           r'(super\.onCreate\s*\([^)]*\)\s*;)',
                           lambda m: m.group(1) + "\n" + inset_code,
@@ -883,6 +659,29 @@ jobs:
                   webView.getSettings().setTextZoom(100);
                   webView.setOverScrollMode(android.view.View.OVER_SCROLL_NEVER);
                   webView.getSettings().setGeolocationEnabled(true);
+
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
+                      public int getTopCssPx() { return zorenoSafeTopCss; }
+                      @android.webkit.JavascriptInterface
+                      public int getBottomCssPx() { return zorenoSafeBottomCss; }
+                  }, "AndroidInsets");
+
+                  webView.addJavascriptInterface(new Object() {
+                      @android.webkit.JavascriptInterface
+                      public void setLightBars(boolean isLightBg) {
+                          runOnUiThread(() -> {
+                              try {
+                                  androidx.core.view.WindowInsetsControllerCompat ctrl =
+                                      androidx.core.view.WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
+                                  if (ctrl != null) {
+                                      ctrl.setAppearanceLightStatusBars(isLightBg);
+                                      ctrl.setAppearanceLightNavigationBars(isLightBg);
+                                  }
+                              } catch (Exception ignored) {}
+                          });
+                      }
+                  }, "AndroidTheme");
 
                   webView.setWebChromeClient(new android.webkit.WebChromeClient() {
                       @Override
@@ -996,29 +795,6 @@ jobs:
 
                   webView.addJavascriptInterface(new Object() {
                       @android.webkit.JavascriptInterface
-                      public void signIn() { startGoogleLogin(); }
-                      @android.webkit.JavascriptInterface
-                      public void startGoogleLogin() {
-                          runOnUiThread(() -> {
-                              try {
-                                  com.google.android.gms.auth.api.signin.GoogleSignInOptions gso =
-                                      new com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
-                                          com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
-                                      )
-                                      .requestIdToken("315803761947-tmmgpr31drlu961n4pmo3h24c27alotv.apps.googleusercontent.com")
-                                      .requestEmail()
-                                      .requestProfile()
-                                      .build();
-                                  com.google.android.gms.auth.api.signin.GoogleSignInClient client =
-                                      com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(MainActivity.this, gso);
-                                  client.signOut().addOnCompleteListener(t -> zorenoGoogleLauncher.launch(client.getSignInIntent()));
-                              } catch (Exception e) {}
-                          });
-                      }
-                  }, "ZorenoGoogleAuth");
-
-                  webView.addJavascriptInterface(new Object() {
-                      @android.webkit.JavascriptInterface
                       public void showRewardedAd(String unitId) {
                           runOnUiThread(() -> {
                               if (zorenoRewardedAd != null) {
@@ -1050,8 +826,8 @@ jobs:
                                   int[] rtLoc = new int[2];
                                   webView.getLocationInWindow(wvLoc);
                                   root.getLocationInWindow(rtLoc);
-                                  int offX = wvLoc[0] - rtLoc[0] - root.getPaddingLeft();
-                                  int offY = wvLoc[1] - rtLoc[1] - root.getPaddingTop();
+                                  int offX = wvLoc[0] - rtLoc[0];
+                                  int offY = wvLoc[1] - rtLoc[1];
 
                                   int boxW = Math.round(widthCss * d);
                                   int boxH = Math.round(heightCss * d);
@@ -1082,6 +858,8 @@ jobs:
                               if (zorenoBannerHost != null) zorenoBannerHost.setVisibility(android.view.View.GONE);
                           });
                       }
+                      @android.webkit.JavascriptInterface
+                      public void hideBannerAd() { hideHomeBannerAd(); }
                       @android.webkit.JavascriptInterface
                       public void setBannerVisible(boolean show, int leftCss, int topCss, int widthCss, int heightCss) {
                           if (show) positionHomeBannerAd(topCss, leftCss, widthCss, heightCss);
@@ -1221,12 +999,13 @@ jobs:
                   webView.addJavascriptInterface(new Object() {
                       @android.webkit.JavascriptInterface
                       public void showNotification(String title, String msg) {
-                          ZorenoNotifWorker.showNotif(MainActivity.this, title, ZorenoNotifWorker.cleanPreview(msg));
+                          String clean = ZorenoNotifWorker.cleanPreview(msg);
+                          if (!clean.isEmpty()) ZorenoNotifWorker.showNotif(MainActivity.this, title, clean);
                       }
                   }, "AndroidNotif");
                   """
 
-                  if "ZorenoGoogleAuth" not in code:
+                  if "AndroidInsets" not in code:
                       if "webView.loadUrl(" in code:
                           code = re.sub(r'(webView\.loadUrl\s*\()', lambda m: js_bridge + "\n" + m.group(1), code, count=1)
                       else:
@@ -1252,6 +1031,7 @@ jobs:
                   "android.permission.ACCESS_COARSE_LOCATION",
                   "android.permission.POST_NOTIFICATIONS",
                   "android.permission.WAKE_LOCK",
+                  "android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS",
                   "com.android.vending.BILLING",
               ]
               perm_block = ""
@@ -1281,13 +1061,14 @@ jobs:
           cat << 'EOF' > app/src/main/res/values/themes.xml
           <resources xmlns:tools="http://schemas.android.com/tools">
               <style name="Theme.Zoreno" parent="Theme.MaterialComponents.DayNight.NoActionBar">
-                  <item name="android:statusBarColor">#0F172A</item>
-                  <item name="android:navigationBarColor">#0F172A</item>
-                  <item name="android:windowLightStatusBar">false</item>
+                  <item name="android:statusBarColor">@android:color/transparent</item>
+                  <item name="android:navigationBarColor">@android:color/transparent</item>
+                  <item name="android:windowLightStatusBar">true</item>
                   <item name="android:windowFullscreen">false</item>
-                  <item name="android:fitsSystemWindows">true</item>
-                  <item name="android:windowBackground">#090D16</item>
-                  <item name="android:windowSplashScreenBackground" tools:targetApi="31">#090D16</item>
+                  <item name="android:fitsSystemWindows">false</item>
+                  <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="27">shortEdges</item>
+                  <item name="android:windowBackground">#FFFFFF</item>
+                  <item name="android:windowSplashScreenBackground" tools:targetApi="31">#FFFFFF</item>
                   <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">@drawable/ic_empty_splash</item>
               </style>
           </resources>
@@ -1330,8 +1111,8 @@ jobs:
                   applicationId = "$APP_ID"
                   minSdk = 24
                   targetSdk = 36
-                  versionCode = 13
-                  versionName = "1.3.0"
+                  versionCode = 14
+                  versionName = "1.4.0"
               }
               signingConfigs {
                   create("release") {
@@ -1367,7 +1148,6 @@ jobs:
               implementation("com.google.guava:guava:32.1.3-android")
               implementation("com.google.android.play:app-update:2.1.0")
               implementation("com.google.android.gms:play-services-ads:23.6.0")
-              implementation("com.google.android.gms:play-services-auth:21.2.0")
               implementation("com.google.firebase:firebase-messaging:24.1.0")
               implementation("com.android.billingclient:billing:8.0.0")
               implementation("com.google.code.gson:gson:2.11.0")
@@ -1381,7 +1161,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: zoreno-v1.3.0-final-release
+          name: zoreno-v1.4.0-production-release
           path: |
             app/build/outputs/apk/**/*.apk
             app/build/outputs/bundle/**/*.aab
