@@ -1,4 +1,4 @@
-name: Build Zoreno Android AAB & APK (v1.4.0 - Code 14)
+name: Build Zoreno Android AAB & APK (v1.4.1 - Code 15)
 
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
           gradle-version: '8.9'
           cache-disabled: true
 
-      - name: Build Zoreno Production v1.4.0 (Code 14)
+      - name: Build Zoreno Production v1.4.1 (Code 15)
         run: |
           ADMOB_APP_ID="ca-app-pub-5825754850490611~6362976717"
           ADMOB_BANNER_ID="ca-app-pub-5825754850490611/8792568001"
@@ -1134,8 +1134,8 @@ jobs:
                   applicationId = "$APP_ID"
                   minSdk = 24
                   targetSdk = 36
-                  versionCode = 14
-                  versionName = "1.4.0"
+                  versionCode = 15
+                  versionName = "1.4.1"
               }
               signingConfigs {
                   create("release") {
@@ -1184,7 +1184,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: success()
         with:
-          name: zoreno-v1.4.0-production-release
+          name: zoreno-v1.4.1-production-release
           path: |
             app/build/outputs/apk/**/*.apk
             app/build/outputs/bundle/**/*.aab
